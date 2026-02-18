@@ -58,7 +58,6 @@ resource "qrator_client_certificate" "cert" {
   type      = "upload"
   certificates = [
     {
-      type = "rsa"
       cert = file("cert.pem")
       key  = file("key.pem")
     }
