@@ -15,15 +15,42 @@ Manages a CDN configuration for a domain in Qrator.
 resource "qrator_cdn" "example" {
   domain_id     = 12345
   cache_control = true
+  http2         = true
 
   access_control_allow_origin = ["https://example.com", "https://www.example.com"]
 
   cache_ignore_params = false
+  client_no_cache     = false
   redirect_code       = 301
 
   client_headers   = ["X-Custom-Header"]
   client_ip_header = "X-Real-IP"
   upstream_headers = ["X-Forwarded-For"]
+
+  compress_disabled = ["br"]
+
+  cache_errors = [
+    {
+      code    = 502
+      timeout = 5000
+    }
+  ]
+
+  cache_errors_permanent = [
+    {
+      code    = 429
+      timeout = 60000
+    }
+  ]
+
+  blocked_uri = [
+    {
+      uri  = "/admin/.*"
+      code = 403
+    }
+  ]
+
+  white_uri = ["/api/.*", "/static/.*"]
 
   sni = [
     {
@@ -62,7 +89,29 @@ terraform import qrator_cdn.example 12345
 - `client_ip_header` (String) Name of the header containing the real client IP address.
 - `redirect_code` (Number) HTTP redirect status code. Must be one of: `301`, `302`, `307`, `308`. Leave unset to disable redirects.
 - `upstream_headers` (List of String) List of HTTP headers to pass from the upstream to the client.
+- `blocked_uri` (Block List) List of URI patterns to block. Each entry specifies a regex pattern and an HTTP response code.
+- `cache_errors` (Block List) Cache error responses from upstream. If upstream returns a matching status code, the next request for the same resource is delayed by the specified timeout (ms).
+- `cache_errors_permanent` (Block List) Permanently cache error responses per client IP. If upstream returns a matching status code, the response is cached for the client IP for the specified timeout (ms).
+- `client_no_cache` (Boolean) If enabled, no cache headers beside cache-control: no-cache are sent to client.
+- `compress_disabled` (List of String) List of compression algorithms to disable. Allowed values: `gzip`, `deflate`, `br`.
+- `http2` (Boolean) Enable CDN support for HTTP/2 (in addition to HTTP/1.1).
 - `sni` (Block List) SNI configuration for CDN. List of hostname-to-certificate mappings.
+- `white_uri` (List of String) List of allowed URI regex patterns. If set, requests not matching any pattern get a 404 response. Leave empty to disable.
+
+### Nested Schema for `blocked_uri`
+
+- `uri` (String, Required) URI regex pattern to block.
+- `code` (Number, Required) HTTP response code to return for blocked URIs (e.g. 403, 404).
+
+### Nested Schema for `cache_errors`
+
+- `code` (Number, Required) HTTP status code from upstream to cache.
+- `timeout` (Number, Required) Timeout in milliseconds before the next request is allowed.
+
+### Nested Schema for `cache_errors_permanent`
+
+- `code` (Number, Required) HTTP status code from upstream to cache.
+- `timeout` (Number, Required) Timeout in milliseconds before the next request from the same client IP is allowed.
 
 ### Nested Schema for `sni`
 

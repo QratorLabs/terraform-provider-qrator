@@ -53,10 +53,15 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				ElementType: types.StringType,
 			},
 			"cache_control": schema.BoolAttribute{
-				Description: "Whether to enable cache control for the CDN.",
+				Description: "If enabled, requests to upstream are governed by the expires and cache-control headers.",
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
+			},
+			"client_no_cache": schema.BoolAttribute{
+				Description: "If enabled, no cache headers beside cache-control: no-cache are sent to client.",
+				Optional:    true,
+				Computed:    true,
 			},
 			"redirect_code": schema.Int64Attribute{
 				Description: "HTTP redirect code (301, 302, 307, or 308).",
@@ -99,11 +104,79 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 							Required:    true,
 						},
 						"certificate": schema.Int64Attribute{
-							Description: "The certificate ID from storage, or omit to use hostname without TLS.",
+							Description: "The certificate ID from storage, or null to disable TLS for this hostname.",
 							Optional:    true,
 						},
 					},
 				},
+			},
+			"blocked_uri": schema.ListNestedAttribute{
+				Description: "List of URI patterns to block. Each entry specifies a regex pattern and an HTTP response code.",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"uri": schema.StringAttribute{
+							Description: "URI regex pattern to block.",
+							Required:    true,
+						},
+						"code": schema.Int64Attribute{
+							Description: "HTTP response code to return for blocked URIs (e.g. 403, 404).",
+							Required:    true,
+						},
+					},
+				},
+			},
+			"http2": schema.BoolAttribute{
+				Description: "Enable CDN support for HTTP/2 (in addition to HTTP/1.1).",
+				Optional:    true,
+				Computed:    true,
+			},
+			"cache_errors": schema.ListNestedAttribute{
+				Description: "Cache error responses from upstream. If upstream returns a matching status code, the next request for the same resource is delayed by the specified timeout (ms).",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"code": schema.Int64Attribute{
+							Description: "HTTP status code from upstream to cache.",
+							Required:    true,
+						},
+						"timeout": schema.Int64Attribute{
+							Description: "Timeout in milliseconds before the next request is allowed.",
+							Required:    true,
+						},
+					},
+				},
+			},
+			"cache_errors_permanent": schema.ListNestedAttribute{
+				Description: "Permanently cache error responses per client IP. If upstream returns a matching status code, the response is cached for the client IP for the specified timeout (ms).",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"code": schema.Int64Attribute{
+							Description: "HTTP status code from upstream to cache.",
+							Required:    true,
+						},
+						"timeout": schema.Int64Attribute{
+							Description: "Timeout in milliseconds before the next request from the same client IP is allowed.",
+							Required:    true,
+						},
+					},
+				},
+			},
+			"compress_disabled": schema.ListAttribute{
+				Description: "List of compression algorithms to disable. Allowed values: gzip, deflate, br.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"white_uri": schema.ListAttribute{
+				Description: "List of allowed URI regex patterns. If set, requests not matching any pattern get a 404 response. Leave empty to disable.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
 			},
 		},
 	}
@@ -199,6 +272,15 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
+	// client_no_cache
+	if !plan.ClientNoCache.IsNull() && !plan.ClientNoCache.IsUnknown() &&
+		(state.ClientNoCache.IsNull() || plan.ClientNoCache.ValueBool() != state.ClientNoCache.ValueBool()) {
+		if _, err := r.client.MakeRequest(ctx, apiPath, "client_no_cache_set", plan.ClientNoCache.ValueBool()); err != nil {
+			resp.Diagnostics.AddError("Failed to update client_no_cache", err.Error())
+			return
+		}
+	}
+
 	// cache_ignore_params
 	if !plan.CacheIgnoreParams.IsNull() && !plan.CacheIgnoreParams.IsUnknown() &&
 		(state.CacheIgnoreParams.IsNull() || plan.CacheIgnoreParams.ValueBool() != state.CacheIgnoreParams.ValueBool()) {
@@ -239,9 +321,61 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
+	// http2
+	if !plan.HTTP2.IsNull() && !plan.HTTP2.IsUnknown() &&
+		(state.HTTP2.IsNull() || plan.HTTP2.ValueBool() != state.HTTP2.ValueBool()) {
+		if _, err := r.client.MakeRequest(ctx, apiPath, "http2_set", plan.HTTP2.ValueBool()); err != nil {
+			resp.Diagnostics.AddError("Failed to update http2", err.Error())
+			return
+		}
+	}
+
+	// cache_errors
+	if !plan.CacheErrors.IsNull() && !plan.CacheErrors.IsUnknown() {
+		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_set", plan.CacheErrors, state.CacheErrors, &resp.Diagnostics); err != nil {
+			return
+		}
+	}
+
+	// cache_errors_permanent
+	if !plan.CacheErrorsPermanent.IsNull() && !plan.CacheErrorsPermanent.IsUnknown() {
+		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_permanent_set", plan.CacheErrorsPermanent, state.CacheErrorsPermanent, &resp.Diagnostics); err != nil {
+			return
+		}
+	}
+
+	// compress_disabled
+	if !IsNullOrUnknown(plan.CompressDisabled) &&
+		ShouldUpdateList(plan.CompressDisabled, state.CompressDisabled, true) {
+		var values []string
+		plan.CompressDisabled.ElementsAs(ctx, &values, false)
+		if _, err := r.client.MakeRequest(ctx, apiPath, "compress_disabled_set", values); err != nil {
+			resp.Diagnostics.AddError("Failed to update compress_disabled", err.Error())
+			return
+		}
+	}
+
 	// sni
 	if !plan.SNI.IsNull() && !plan.SNI.IsUnknown() {
 		if err := r.updateSNI(ctx, apiPath, plan.SNI, state.SNI, &resp.Diagnostics); err != nil {
+			return
+		}
+	}
+
+	// blocked_uri
+	if !plan.BlockedURI.IsNull() && !plan.BlockedURI.IsUnknown() {
+		if err := r.updateBlockedURI(ctx, apiPath, plan.BlockedURI, state.BlockedURI, &resp.Diagnostics); err != nil {
+			return
+		}
+	}
+
+	// white_uri
+	if !IsNullOrUnknown(plan.WhiteURI) &&
+		ShouldUpdateList(plan.WhiteURI, state.WhiteURI, true) {
+		var values []string
+		plan.WhiteURI.ElementsAs(ctx, &values, false)
+		if _, err := r.client.MakeRequest(ctx, apiPath, "white_uri_set", values); err != nil {
+			resp.Diagnostics.AddError("Failed to update white_uri", err.Error())
 			return
 		}
 	}
@@ -264,11 +398,18 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		accessControlAllowOrigin []string
 		cacheControl             bool
 		redirectCode             *int64
+		clientNoCache            bool
 		cacheIgnoreParams        bool
 		clientHeaders            []string
 		clientIPHeader           *string
 		upstreamHeaders          []string
+		http2                    bool
+		cacheErrors              []cdnCacheErrorEntry
+		cacheErrorsPermanent     []cdnCacheErrorEntry
+		compressDisabled         []string
 		sniEntries               []cdnSNIEntry
+		blockedURIEntries        []cdnBlockedURIEntry
+		whiteURI                 []string
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -287,6 +428,14 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 			return err
 		}
 		return json.Unmarshal(v, &cacheControl)
+	})
+
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "client_no_cache_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &clientNoCache)
 	})
 
 	g.Go(func() error {
@@ -335,11 +484,59 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	})
 
 	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "http2_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &http2)
+	})
+
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "cache_errors_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &cacheErrors)
+	})
+
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "cache_errors_permanent_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &cacheErrorsPermanent)
+	})
+
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "compress_disabled_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &compressDisabled)
+	})
+
+	g.Go(func() error {
 		v, err := r.client.MakeRequest(gctx, apiPath, "sni_get", nil)
 		if err != nil {
 			return err
 		}
 		return json.Unmarshal(v, &sniEntries)
+	})
+
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "blocked_uri_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &blockedURIEntries)
+	})
+
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "white_uri_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &whiteURI)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -354,6 +551,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	} else {
 		state.RedirectCode = types.Int64Value(*redirectCode)
 	}
+	state.ClientNoCache = types.BoolValue(clientNoCache)
 	state.CacheIgnoreParams = types.BoolValue(cacheIgnoreParams)
 	state.ClientHeaders, _ = types.ListValueFrom(ctx, types.StringType, clientHeaders)
 	if clientIPHeader == nil {
@@ -367,10 +565,33 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	state.ClientHeaders, _ = NormalizeStringList(ctx, state.ClientHeaders)
 	state.UpstreamHeaders, _ = NormalizeStringList(ctx, state.UpstreamHeaders)
 
+	state.HTTP2 = types.BoolValue(http2)
+
+	state.CacheErrors = cacheErrorEntriesToList(ctx, cacheErrors, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	state.CacheErrorsPermanent = cacheErrorEntriesToList(ctx, cacheErrorsPermanent, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	state.CompressDisabled, _ = types.ListValueFrom(ctx, types.StringType, compressDisabled)
+	state.CompressDisabled, _ = NormalizeStringList(ctx, state.CompressDisabled)
+
 	state.SNI = sniEntriesToList(ctx, sniEntries, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	state.BlockedURI = blockedURIEntriesToList(ctx, blockedURIEntries, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	state.WhiteURI, _ = types.ListValueFrom(ctx, types.StringType, whiteURI)
+	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
 
 	resp.State.Set(ctx, &state)
 }
@@ -474,6 +695,186 @@ func sniEntriesToList(ctx context.Context, entries []cdnSNIEntry, diags *diag.Di
 	}
 
 	list, d := types.ListValue(types.ObjectType{AttrTypes: sniAttrTypes}, elems)
+	diags.Append(d...)
+	return list
+}
+
+// cdnCacheErrorEntry represents the API structure for a CDN cache error entry.
+type cdnCacheErrorEntry struct {
+	Code    int64 `json:"code"`
+	Timeout int64 `json:"timeout"`
+}
+
+var cacheErrorAttrTypes = map[string]attr.Type{
+	"code":    types.Int64Type,
+	"timeout": types.Int64Type,
+}
+
+// updateCacheErrors calls the specified API method if the cache errors configuration has changed.
+func (r *CDNResource) updateCacheErrors(ctx context.Context, apiPath, method string, plan, state types.List, diags *diag.Diagnostics) error {
+	var planEntries, stateEntries []CDNCacheErrorEntryModel
+
+	d := plan.ElementsAs(ctx, &planEntries, false)
+	diags.Append(d...)
+	if diags.HasError() {
+		return fmt.Errorf("failed to parse plan %s", method)
+	}
+
+	if !state.IsNull() && !state.IsUnknown() {
+		d = state.ElementsAs(ctx, &stateEntries, false)
+		diags.Append(d...)
+		if diags.HasError() {
+			return fmt.Errorf("failed to parse state %s", method)
+		}
+	}
+
+	if cacheErrorEntriesEqual(planEntries, stateEntries) {
+		return nil
+	}
+
+	params := make([]map[string]interface{}, len(planEntries))
+	for i, e := range planEntries {
+		params[i] = map[string]interface{}{
+			"code":    e.Code.ValueInt64(),
+			"timeout": e.Timeout.ValueInt64(),
+		}
+	}
+
+	if _, err := r.client.MakeRequest(ctx, apiPath, method, params); err != nil {
+		diags.AddError(fmt.Sprintf("Failed to update %s", method), err.Error())
+		return err
+	}
+
+	return nil
+}
+
+// cacheErrorEntriesEqual compares two slices of CDNCacheErrorEntryModel for equality.
+func cacheErrorEntriesEqual(a, b []CDNCacheErrorEntryModel) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Code.ValueInt64() != b[i].Code.ValueInt64() {
+			return false
+		}
+		if a[i].Timeout.ValueInt64() != b[i].Timeout.ValueInt64() {
+			return false
+		}
+	}
+	return true
+}
+
+// cacheErrorEntriesToList converts API cache error entries to a Terraform List value.
+func cacheErrorEntriesToList(ctx context.Context, entries []cdnCacheErrorEntry, diags *diag.Diagnostics) types.List {
+	models := make([]CDNCacheErrorEntryModel, len(entries))
+	for i, e := range entries {
+		models[i] = CDNCacheErrorEntryModel{
+			Code:    types.Int64Value(e.Code),
+			Timeout: types.Int64Value(e.Timeout),
+		}
+	}
+
+	elems := make([]attr.Value, len(models))
+	for i, m := range models {
+		obj, d := types.ObjectValueFrom(ctx, cacheErrorAttrTypes, m)
+		diags.Append(d...)
+		if diags.HasError() {
+			return types.ListNull(types.ObjectType{AttrTypes: cacheErrorAttrTypes})
+		}
+		elems[i] = obj
+	}
+
+	list, d := types.ListValue(types.ObjectType{AttrTypes: cacheErrorAttrTypes}, elems)
+	diags.Append(d...)
+	return list
+}
+
+// cdnBlockedURIEntry represents the API structure for a CDN blocked URI entry.
+type cdnBlockedURIEntry struct {
+	URI  string `json:"uri"`
+	Code int64  `json:"code"`
+}
+
+// updateBlockedURI calls blocked_uri_set if the blocked URI configuration has changed.
+func (r *CDNResource) updateBlockedURI(ctx context.Context, apiPath string, plan, state types.List, diags *diag.Diagnostics) error {
+	var planEntries, stateEntries []CDNBlockedURIEntryModel
+
+	d := plan.ElementsAs(ctx, &planEntries, false)
+	diags.Append(d...)
+	if diags.HasError() {
+		return fmt.Errorf("failed to parse plan blocked_uri")
+	}
+
+	if !state.IsNull() && !state.IsUnknown() {
+		d = state.ElementsAs(ctx, &stateEntries, false)
+		diags.Append(d...)
+		if diags.HasError() {
+			return fmt.Errorf("failed to parse state blocked_uri")
+		}
+	}
+
+	if blockedURIEntriesEqual(planEntries, stateEntries) {
+		return nil
+	}
+
+	params := make([]map[string]interface{}, len(planEntries))
+	for i, e := range planEntries {
+		params[i] = map[string]interface{}{
+			"uri":  e.URI.ValueString(),
+			"code": e.Code.ValueInt64(),
+		}
+	}
+
+	if _, err := r.client.MakeRequest(ctx, apiPath, "blocked_uri_set", params); err != nil {
+		diags.AddError("Failed to update blocked_uri", err.Error())
+		return err
+	}
+
+	return nil
+}
+
+// blockedURIEntriesEqual compares two slices of CDNBlockedURIEntryModel for equality.
+func blockedURIEntriesEqual(a, b []CDNBlockedURIEntryModel) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].URI.ValueString() != b[i].URI.ValueString() {
+			return false
+		}
+		if a[i].Code.ValueInt64() != b[i].Code.ValueInt64() {
+			return false
+		}
+	}
+	return true
+}
+
+// blockedURIEntriesToList converts API blocked URI entries to a Terraform List value.
+func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, diags *diag.Diagnostics) types.List {
+	attrTypes := map[string]attr.Type{
+		"uri":  types.StringType,
+		"code": types.Int64Type,
+	}
+
+	models := make([]CDNBlockedURIEntryModel, len(entries))
+	for i, e := range entries {
+		models[i] = CDNBlockedURIEntryModel{
+			URI:  types.StringValue(e.URI),
+			Code: types.Int64Value(e.Code),
+		}
+	}
+
+	elems := make([]attr.Value, len(models))
+	for i, m := range models {
+		obj, d := types.ObjectValueFrom(ctx, attrTypes, m)
+		diags.Append(d...)
+		if diags.HasError() {
+			return types.ListNull(types.ObjectType{AttrTypes: attrTypes})
+		}
+		elems[i] = obj
+	}
+
+	list, d := types.ListValue(types.ObjectType{AttrTypes: attrTypes}, elems)
 	diags.Append(d...)
 	return list
 }

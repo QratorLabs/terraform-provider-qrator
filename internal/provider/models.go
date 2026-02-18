@@ -18,11 +18,32 @@ type CDNModel struct {
 
 	UpstreamHeaders types.List `tfsdk:"upstream_headers"`
 
-	SNI types.List `tfsdk:"sni"`
+	ClientNoCache types.Bool `tfsdk:"client_no_cache"`
+	HTTP2         types.Bool `tfsdk:"http2"`
+
+	CacheErrors          types.List `tfsdk:"cache_errors"`
+	CacheErrorsPermanent types.List `tfsdk:"cache_errors_permanent"`
+	CompressDisabled     types.List `tfsdk:"compress_disabled"`
+
+	SNI        types.List `tfsdk:"sni"`
+	BlockedURI types.List `tfsdk:"blocked_uri"`
+	WhiteURI   types.List `tfsdk:"white_uri"`
 }
 
 // CDNSNIEntryModel defines the model for a CDN SNI entry.
 type CDNSNIEntryModel struct {
 	Host        types.String `tfsdk:"host"`
 	Certificate types.Int64  `tfsdk:"certificate"`
+}
+
+// CDNBlockedURIEntryModel defines the model for a CDN blocked URI entry.
+type CDNBlockedURIEntryModel struct {
+	URI  types.String `tfsdk:"uri"`
+	Code types.Int64  `tfsdk:"code"`
+}
+
+// CDNCacheErrorEntryModel defines the model for a CDN cache error entry.
+type CDNCacheErrorEntryModel struct {
+	Code    types.Int64 `tfsdk:"code"`
+	Timeout types.Int64 `tfsdk:"timeout"`
 }
