@@ -23,9 +23,9 @@ resource "qrator_cdn" "example" {
   client_no_cache     = false
   redirect_code       = 301
 
-  client_headers   = ["X-Custom-Header"]
+  client_headers   = ["X-Custom-Header:value"]
   client_ip_header = "X-Real-IP"
-  upstream_headers = ["X-Forwarded-For"]
+  upstream_headers = ["X-CDN-Service:Qrator"]
 
   compress_disabled = ["br"]
 
@@ -82,13 +82,13 @@ terraform import qrator_cdn.example 12345
 
 ### Optional
 
-- `access_control_allow_origin` (List of String) List of allowed origins for CORS Access-Control-Allow-Origin header.
+- `access_control_allow_origin` (List of String) List of origin regex patterns. If the Origin header from the client matches one of the patterns, CDN adds an Access-Control-Allow-Origin header equal to the received Origin value.
 - `cache_control` (Boolean) Whether to enable cache control. Defaults to `false`.
 - `cache_ignore_params` (Boolean) Whether to ignore query parameters when caching. Defaults to `false`.
-- `client_headers` (List of String) List of HTTP headers to pass from the client to the upstream.
+- `client_headers` (List of String) Headers that will be added to every response sent by CDN to client. Format: `header:value`.
 - `client_ip_header` (String) Name of the header containing the real client IP address.
-- `redirect_code` (Number) HTTP redirect status code. Must be one of: `301`, `302`, `307`, `308`. Leave unset to disable redirects.
-- `upstream_headers` (List of String) List of HTTP headers to pass from the upstream to the client.
+- `redirect_code` (Number) HTTP-to-HTTPS redirect status code returned by CDN edge nodes. Must be `301`, `302`, `307`, or `308`. Leave unset to disable.
+- `upstream_headers` (List of String) Headers that will be added to every request sent by CDN to upstream. Format: `header:value`.
 - `blocked_uri` (Block List) List of URI patterns to block. Each entry specifies a regex pattern and an HTTP response code.
 - `cache_errors` (Block List) Cache error responses from upstream. If upstream returns a matching status code, the next request for the same resource is delayed by the specified timeout (ms).
 - `cache_errors_permanent` (Block List) Permanently cache error responses per client IP. If upstream returns a matching status code, the response is cached for the client IP for the specified timeout (ms).

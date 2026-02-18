@@ -47,7 +47,7 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				},
 			},
 			"access_control_allow_origin": schema.ListAttribute{
-				Description: "List of origins for the Access-Control-Allow-Origin header.",
+				Description: "List of origin regex patterns. If the Origin header from the client matches one of the patterns, CDN adds an Access-Control-Allow-Origin header equal to the received Origin value.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
@@ -64,7 +64,7 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 			},
 			"redirect_code": schema.Int64Attribute{
-				Description: "HTTP redirect code (301, 302, 307, or 308).",
+				Description: "HTTP-to-HTTPS redirect status code returned by CDN edge nodes. Must be 301, 302, 307, or 308. Leave unset to disable.",
 				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.OneOf(301, 302, 307, 308),
@@ -77,7 +77,7 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 			},
 			"client_headers": schema.ListAttribute{
-				Description: "List of headers to pass to the client.",
+				Description: "Headers that will be added to every response sent by CDN to client. Format: header:value.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
@@ -88,7 +88,7 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 			},
 			"upstream_headers": schema.ListAttribute{
-				Description: "List of headers to pass to the upstream server.",
+				Description: "Headers that will be added to every request sent by CDN to upstream. Format: header:value.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
