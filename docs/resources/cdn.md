@@ -17,7 +17,7 @@ resource "qrator_cdn" "example" {
   cache_control = true
   http2         = true
 
-  access_control_allow_origin = ["https://example.com", "https://www.example.com"]
+  access_control_allow_origin = ["https://(www\\.)?example\\.com"]
 
   cache_ignore_params = false
   client_no_cache     = false

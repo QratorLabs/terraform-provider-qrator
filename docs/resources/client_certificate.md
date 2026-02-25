@@ -31,7 +31,7 @@ resource "qrator_client_certificate" "upload" {
 resource "qrator_client_certificate" "letsencrypt" {
   client_id = 12345
   type      = "letsencrypt"
-  domain_id = qrator_domain.example.domain_id
+  domain_id = 12345
   hostnames = ["example.com", "www.example.com"]
 }
 ```
