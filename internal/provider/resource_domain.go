@@ -89,8 +89,10 @@ type apiWebSocketUpstream struct {
 }
 
 type domainSNIEntry struct {
+	LinkID      int64   `json:"link_id"`
 	Port        int64   `json:"port"`
 	Hostname    *string `json:"hostname"`
+	DomainID    int64   `json:"domain_id,omitempty"`
 	Certificate int64   `json:"certificate"`
 }
 
@@ -165,6 +167,13 @@ func (r *DomainResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Computed:    true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
+						"link_id": schema.Int64Attribute{
+							Description: "SNI link ID assigned by the API.",
+							Computed:    true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
+						},
 						"host": schema.StringAttribute{
 							Description: "The hostname, or null for the default domain certificate.",
 							Optional:    true,
@@ -579,9 +588,15 @@ func (r *DomainResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
-	// Update SNI.
+	// Set SNI via sni_set (no prior state on create).
 	if !plan.SNI.IsNull() && !plan.SNI.IsUnknown() {
-		if err := r.domainUpdateSNI(ctx, apiPath, plan.SNI, types.ListNull(domainSNIObjType()), &resp.Diagnostics); err != nil {
+		var sniEntries []DomainSNIEntryModel
+		resp.Diagnostics.Append(plan.SNI.ElementsAs(ctx, &sniEntries, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if _, err := r.domainWriteSNI(ctx, apiPath, sniEntries); err != nil {
+			resp.Diagnostics.AddError("Failed to set SNI", err.Error())
 			return
 		}
 	}
@@ -660,6 +675,12 @@ func (r *DomainResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if err := r.domainUpdateSNI(ctx, apiPath, plan.SNI, state.SNI, &resp.Diagnostics); err != nil {
 			return
 		}
+	} else if !state.SNI.IsNull() && !state.SNI.IsUnknown() {
+		// Plan has no SNI block but state does — clear.
+		if _, err := r.client.MakeRequest(ctx, apiPath, "sni_clear", nil); err != nil {
+			resp.Diagnostics.AddError("Failed to clear SNI", err.Error())
+			return
+		}
 	}
 
 	// Read back.
@@ -702,6 +723,7 @@ func (r *DomainResource) Delete(ctx context.Context, req resource.DeleteRequest,
 // ---------------------------------------------------------------------------
 
 var domainSNIAttrTypes = map[string]attr.Type{
+	"link_id":     types.Int64Type,
 	"host":        types.StringType,
 	"certificate": types.Int64Type,
 }
@@ -710,6 +732,47 @@ func domainSNIObjType() types.ObjectType {
 	return types.ObjectType{AttrTypes: domainSNIAttrTypes}
 }
 
+// sniHostKey returns a string key for matching SNI entries by hostname.
+// Null hostname (default certificate) maps to the empty string.
+func sniHostKey(m *DomainSNIEntryModel) string {
+	if m.Host.IsNull() {
+		return ""
+	}
+	return m.Host.ValueString()
+}
+
+// domainWriteSNI replaces the full SNI state via sni_set. Used on Create
+// (no prior state) or when state has no link_ids.
+// Returns the entries from the API response (with link_ids populated).
+func (r *DomainResource) domainWriteSNI(ctx context.Context, apiPath string, entries []DomainSNIEntryModel) ([]domainSNIEntry, error) {
+	params := make([]map[string]interface{}, len(entries))
+	for i, e := range entries {
+		entry := map[string]interface{}{
+			"port":        443,
+			"certificate": e.Certificate.ValueInt64(),
+		}
+		if e.Host.IsNull() {
+			entry["hostname"] = nil
+		} else {
+			entry["hostname"] = e.Host.ValueString()
+		}
+		params[i] = entry
+	}
+
+	result, err := r.client.MakeRequest(ctx, apiPath, "sni_set", params)
+	if err != nil {
+		return nil, fmt.Errorf("sni_set failed: %w", err)
+	}
+
+	var resp []domainSNIEntry
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse sni_set response: %w", err)
+	}
+	return resp, nil
+}
+
+// domainUpdateSNI performs an incremental SNI update using sni_link_add and
+// sni_link_remove when state has link_ids, falling back to sni_set otherwise.
 func (r *DomainResource) domainUpdateSNI(ctx context.Context, apiPath string, plan, state types.List, diags *diag.Diagnostics) error {
 	var planEntries, stateEntries []DomainSNIEntryModel
 
@@ -727,55 +790,76 @@ func (r *DomainResource) domainUpdateSNI(ctx context.Context, apiPath string, pl
 		}
 	}
 
-	if domainSNIEntriesEqual(planEntries, stateEntries) {
+	// Build lookup: hostname → state entry (with link_id).
+	stateByHost := make(map[string]*DomainSNIEntryModel, len(stateEntries))
+	for i := range stateEntries {
+		stateByHost[sniHostKey(&stateEntries[i])] = &stateEntries[i]
+	}
+
+	// Build lookup: hostname → plan entry.
+	planByHost := make(map[string]*DomainSNIEntryModel, len(planEntries))
+	for i := range planEntries {
+		planByHost[sniHostKey(&planEntries[i])] = &planEntries[i]
+	}
+
+	// Compute diff.
+	var toRemove []int64                  // link_ids to remove
+	var toAdd []DomainSNIEntryModel       // entries to add/overwrite
+
+	// Entries in state but not in plan → remove.
+	for key, se := range stateByHost {
+		if _, ok := planByHost[key]; !ok {
+			if !se.LinkID.IsNull() && !se.LinkID.IsUnknown() {
+				toRemove = append(toRemove, se.LinkID.ValueInt64())
+			}
+		}
+	}
+
+	// Entries in plan: add if new or certificate changed.
+	for key, pe := range planByHost {
+		se, exists := stateByHost[key]
+		if !exists || se.Certificate.ValueInt64() != pe.Certificate.ValueInt64() {
+			toAdd = append(toAdd, *pe)
+		}
+	}
+
+	if len(toRemove) == 0 && len(toAdd) == 0 {
 		return nil
 	}
 
-	params := make([]map[string]interface{}, len(planEntries))
-	for i, e := range planEntries {
-		entry := map[string]interface{}{
-			"port":        443,
-			"certificate": e.Certificate.ValueInt64(),
+	// Remove old entries.
+	for _, linkID := range toRemove {
+		if _, err := r.client.MakeRequest(ctx, apiPath, "sni_link_remove", []interface{}{linkID}); err != nil {
+			diags.AddError("Failed to remove SNI link", fmt.Sprintf("link_id %d: %s", linkID, err.Error()))
+			return err
 		}
-		if e.Host.IsNull() {
-			entry["hostname"] = nil
-		} else {
-			entry["hostname"] = e.Host.ValueString()
-		}
-		params[i] = entry
 	}
 
-	if _, err := r.client.MakeRequest(ctx, apiPath, "sni_set", params); err != nil {
-		diags.AddError("Failed to update SNI", err.Error())
-		return err
+	// Add new/updated entries.
+	for _, e := range toAdd {
+		var hostname interface{}
+		if e.Host.IsNull() {
+			hostname = nil
+		} else {
+			hostname = e.Host.ValueString()
+		}
+		params := []interface{}{int64(443), e.Certificate.ValueInt64(), hostname}
+		if _, err := r.client.MakeRequest(ctx, apiPath, "sni_link_add", params); err != nil {
+			diags.AddError("Failed to add SNI link", err.Error())
+			return err
+		}
 	}
 
 	return nil
 }
 
-func domainSNIEntriesEqual(a, b []DomainSNIEntryModel) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Host.IsNull() != b[i].Host.IsNull() {
-			return false
-		}
-		if !a[i].Host.IsNull() && a[i].Host.ValueString() != b[i].Host.ValueString() {
-			return false
-		}
-		if a[i].Certificate.ValueInt64() != b[i].Certificate.ValueInt64() {
-			return false
-		}
-	}
-	return true
-}
-
+// domainSNIEntriesToList converts API SNI entries to a Terraform List value.
 func domainSNIEntriesToList(ctx context.Context, entries []domainSNIEntry, diags *diag.Diagnostics) types.List {
 	objType := domainSNIObjType()
 
 	models := make([]DomainSNIEntryModel, len(entries))
 	for i, e := range entries {
+		models[i].LinkID = types.Int64Value(e.LinkID)
 		if e.Hostname != nil {
 			models[i].Host = types.StringValue(*e.Hostname)
 		} else {

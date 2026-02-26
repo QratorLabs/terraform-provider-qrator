@@ -58,6 +58,7 @@ type DomainModel struct {
 
 // DomainSNIEntryModel defines the model for a domain SNI entry.
 type DomainSNIEntryModel struct {
+	LinkID      types.Int64  `tfsdk:"link_id"`
 	Host        types.String `tfsdk:"host"`
 	Certificate types.Int64  `tfsdk:"certificate"`
 }

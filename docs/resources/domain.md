@@ -328,6 +328,10 @@ Optional:
 - `host` (String, Optional) The hostname. Omit (null) for the default domain certificate.
 - `certificate` (Number, Required) The certificate ID from storage.
 
+Read-Only:
+
+- `link_id` (Number) SNI link ID assigned by the API.
+
 ## Validation Rules
 
 **Services:**
