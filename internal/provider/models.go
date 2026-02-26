@@ -48,12 +48,27 @@ type CDNCacheErrorEntryModel struct {
 	Timeout types.Int64 `tfsdk:"timeout"`
 }
 
-// DomainModel defines the model for a domain resource.
+// DomainModel defines the model for the qrator_domain resource (name only).
 type DomainModel struct {
-	ID       types.Int64          `tfsdk:"id"`
-	Name     types.String         `tfsdk:"name"`
-	Services *DomainServicesModel `tfsdk:"services"`
-	SNI      types.List           `tfsdk:"sni"`
+	ID                   types.Int64  `tfsdk:"id"`
+	Name                 types.String `tfsdk:"name"`
+	NotWhitelistedPolicy types.String `tfsdk:"not_whitelisted_policy"`
+}
+
+// DomainServicesResourceModel defines the model for the qrator_domain_services resource.
+type DomainServicesResourceModel struct {
+	DomainID  types.Int64                  `tfsdk:"domain_id"`
+	HTTP      []DomainServiceHTTPModel     `tfsdk:"http"`
+	NAT       []DomainServiceNATModel      `tfsdk:"nat"`
+	NATAll    []DomainServiceNATAllModel   `tfsdk:"nat_all"`
+	TCPProxy  []DomainServiceTCPProxyModel `tfsdk:"tcpproxy"`
+	WebSocket []DomainServiceWSModel       `tfsdk:"websocket"`
+}
+
+// DomainSNIResourceModel defines the model for the qrator_domain_sni resource.
+type DomainSNIResourceModel struct {
+	DomainID types.Int64 `tfsdk:"domain_id"`
+	Links    types.List  `tfsdk:"links"`
 }
 
 // DomainSNIEntryModel defines the model for a domain SNI entry.
@@ -61,15 +76,6 @@ type DomainSNIEntryModel struct {
 	LinkID      types.Int64  `tfsdk:"link_id"`
 	Host        types.String `tfsdk:"host"`
 	Certificate types.Int64  `tfsdk:"certificate"`
-}
-
-// DomainServicesModel groups all service type lists.
-type DomainServicesModel struct {
-	HTTP      []DomainServiceHTTPModel     `tfsdk:"http"`
-	NAT       []DomainServiceNATModel      `tfsdk:"nat"`
-	NATAll    []DomainServiceNATAllModel   `tfsdk:"nat_all"`
-	TCPProxy  []DomainServiceTCPProxyModel `tfsdk:"tcpproxy"`
-	WebSocket []DomainServiceWSModel       `tfsdk:"websocket"`
 }
 
 // DomainServiceHTTPModel represents an HTTP service entry.
@@ -127,6 +133,19 @@ type DomainServiceWSModel struct {
 	DefaultDrop types.Bool                  `tfsdk:"default_drop"`
 	UpstreamSSL types.Bool                  `tfsdk:"upstream_ssl"`
 	Upstreams   []DomainUpstreamServerModel `tfsdk:"upstreams"`
+}
+
+// DomainIPListResourceModel defines the model for whitelist/blacklist resources.
+type DomainIPListResourceModel struct {
+	DomainID types.Int64        `tfsdk:"domain_id"`
+	Entries  []IPListEntryModel `tfsdk:"entries"`
+}
+
+// IPListEntryModel defines a single IP entry (whitelist or blacklist).
+type IPListEntryModel struct {
+	IP      types.String `tfsdk:"ip"`
+	TTL     types.Int64  `tfsdk:"ttl"`
+	Comment types.String `tfsdk:"comment"`
 }
 
 // DomainUpstreamServerModel represents a single upstream server.

@@ -35,16 +35,10 @@ type APIRequest struct {
 	ID     uint64      `json:"id"`
 }
 
-// APIError represents an error response from the Qrator API.
-type APIError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 // APIResponse represents a JSON-RPC response from the Qrator API.
 type APIResponse struct {
 	Result json.RawMessage `json:"result"`
-	Error  *APIError       `json:"error"`
+	Error  *string         `json:"error"`
 	ID     uint64          `json:"id"`
 }
 
@@ -247,11 +241,14 @@ func (c *QratorClient) makeRequestAttempt(ctx context.Context, path string, meth
 
 	// Check for API-level errors
 	if apiResponse.Error != nil {
-		errMsg := fmt.Sprintf("code: %d, message: %s", apiResponse.Error.Code, apiResponse.Error.Message)
+		details := resp.Header.Get("X-Qrator-API-Error-Details")
 		if c.debug {
-			log.Printf("[ERROR] API error response: %s", errMsg)
+			log.Printf("[ERROR] API error response: %s (details: %s)", *apiResponse.Error, details)
 		}
-		return nil, fmt.Errorf("API error: %s", errMsg)
+		if details != "" {
+			return nil, fmt.Errorf("API error: %s (%s)", *apiResponse.Error, details)
+		}
+		return nil, fmt.Errorf("API error: %s", *apiResponse.Error)
 	}
 
 	return apiResponse.Result, nil

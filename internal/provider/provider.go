@@ -97,5 +97,9 @@ func (p *QratorProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewCDNResource,
 		NewClientCertificateResource,
 		NewDomainResource,
+		NewDomainServicesResource,
+		NewDomainSNIResource,
+		NewDomainWhitelistResource,
+		NewDomainBlacklistResource,
 	}
 }

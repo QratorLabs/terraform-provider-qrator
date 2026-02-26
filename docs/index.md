@@ -1,12 +1,12 @@
 ---
 page_title: "Provider: Qrator"
 description: |-
-  The Qrator provider manages CDN configurations and client certificates in Qrator.
+  The Qrator provider manages domains, services, SNI, whitelist/blacklist, CDN configurations, and client certificates in Qrator.
 ---
 
 # Qrator Provider
 
-The Qrator provider allows you to manage CDN configurations and client certificates in [Qrator](https://qrator.net/).
+The Qrator provider allows you to manage domains, services, SNI, whitelist/blacklist, CDN configurations, and client certificates in [Qrator](https://qrator.net/).
 
 ## Authentication
 
@@ -27,12 +27,19 @@ provider "qrator" {
   api_key  = var.qrator_api_key
   endpoint = "https://api.qrator.net"
 }
-
-resource "qrator_cdn" "example" {
-  domain_id     = 12345
-  cache_control = true
-}
 ```
+
+## Resources
+
+| Resource | Description |
+|----------|-------------|
+| `qrator_domain` | Domain name management |
+| `qrator_domain_services` | Service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
+| `qrator_domain_sni` | SNI hostname-to-certificate mappings |
+| `qrator_domain_whitelist` | IP whitelist (allowed addresses) |
+| `qrator_domain_blacklist` | IP blacklist (blocked addresses) |
+| `qrator_cdn` | CDN configuration |
+| `qrator_client_certificate` | Client certificates (upload / Let's Encrypt) |
 
 ## Schema
 
