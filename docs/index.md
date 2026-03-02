@@ -39,12 +39,14 @@ provider "qrator" {
 | `qrator_domain_whitelist` | Domain IP whitelist (allowed addresses) |
 | `qrator_domain_blacklist` | Domain IP blacklist (blocked addresses) |
 | `qrator_service` | Service name management |
+| `qrator_service_status` | Service status (online/offline) |
 | `qrator_service_services` | Service list (DNS, HTTP, ICMP, NAT, ingress/egress types) |
 | `qrator_service_ips` | Service upstream IP addresses |
 | `qrator_service_sni` | Service SNI hostname-to-certificate mappings |
 | `qrator_service_whitelist` | Service IP whitelist (allowed addresses) |
 | `qrator_service_blacklist` | Service IP blacklist (blocked addresses) |
 | `qrator_cdn` | CDN configuration |
+| `qrator_cdn_sni` | CDN SNI hostname-to-certificate mappings |
 | `qrator_client_certificate` | Client certificates (upload / Let's Encrypt) |
 
 ## Schema
