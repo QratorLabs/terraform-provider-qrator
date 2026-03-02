@@ -9,7 +9,7 @@ type CDNModel struct {
 	DomainID types.Int64 `tfsdk:"domain_id"`
 
 	AccessControlAllowOrigin types.List  `tfsdk:"access_control_allow_origin"`
-	CacheControl             types.Bool  `tfsdk:"cache_control"`
+	CacheControl             types.String `tfsdk:"cache_control"`
 	RedirectCode             types.Int64 `tfsdk:"redirect_code"`
 
 	CacheIgnoreParams types.Bool   `tfsdk:"cache_ignore_params"`
@@ -25,7 +25,6 @@ type CDNModel struct {
 	CacheErrorsPermanent types.List `tfsdk:"cache_errors_permanent"`
 	CompressDisabled     types.List `tfsdk:"compress_disabled"`
 
-	SNI        types.List `tfsdk:"sni"`
 	BlockedURI types.List `tfsdk:"blocked_uri"`
 	WhiteURI   types.List `tfsdk:"white_uri"`
 }
@@ -48,12 +47,9 @@ type CDNCacheErrorEntryModel struct {
 	Timeout types.Int64 `tfsdk:"timeout"`
 }
 
-// DomainModel defines the model for the qrator_domain resource (name only).
-type DomainModel struct {
-	ID                   types.Int64  `tfsdk:"id"`
-	Name                 types.String `tfsdk:"name"`
-	NotWhitelistedPolicy types.String `tfsdk:"not_whitelisted_policy"`
-}
+// ---------------------------------------------------------------------------
+// Domain services models
+// ---------------------------------------------------------------------------
 
 // DomainServicesResourceModel defines the model for the qrator_domain_services resource.
 type DomainServicesResourceModel struct {
@@ -65,14 +61,8 @@ type DomainServicesResourceModel struct {
 	WebSocket []DomainServiceWSModel       `tfsdk:"websocket"`
 }
 
-// DomainSNIResourceModel defines the model for the qrator_domain_sni resource.
-type DomainSNIResourceModel struct {
-	DomainID types.Int64 `tfsdk:"domain_id"`
-	Links    types.List  `tfsdk:"links"`
-}
-
-// DomainSNIEntryModel defines the model for a domain SNI entry.
-type DomainSNIEntryModel struct {
+// SNIEntryModel defines the model for a domain/service SNI entry.
+type SNIEntryModel struct {
 	LinkID      types.Int64  `tfsdk:"link_id"`
 	Host        types.String `tfsdk:"host"`
 	Certificate types.Int64  `tfsdk:"certificate"`
@@ -135,10 +125,14 @@ type DomainServiceWSModel struct {
 	Upstreams   []DomainUpstreamServerModel `tfsdk:"upstreams"`
 }
 
-// DomainIPListResourceModel defines the model for whitelist/blacklist resources.
-type DomainIPListResourceModel struct {
-	DomainID types.Int64        `tfsdk:"domain_id"`
-	Entries  []IPListEntryModel `tfsdk:"entries"`
+// DomainUpstreamServerModel represents a single upstream server.
+type DomainUpstreamServerModel struct {
+	IP        types.String `tfsdk:"ip"`
+	DNSRecord types.String `tfsdk:"dns_record"`
+	Port      types.Int64  `tfsdk:"port"`
+	Weight    types.Int64  `tfsdk:"weight"`
+	Type      types.String `tfsdk:"type"`
+	Name      types.String `tfsdk:"name"`
 }
 
 // IPListEntryModel defines a single IP entry (whitelist or blacklist).
@@ -148,12 +142,92 @@ type IPListEntryModel struct {
 	Comment types.String `tfsdk:"comment"`
 }
 
-// DomainUpstreamServerModel represents a single upstream server.
-type DomainUpstreamServerModel struct {
-	IP        types.String `tfsdk:"ip"`
-	DNSRecord types.String `tfsdk:"dns_record"`
-	Port      types.Int64  `tfsdk:"port"`
-	Weight    types.Int64  `tfsdk:"weight"`
-	Type      types.String `tfsdk:"type"`
-	Name      types.String `tfsdk:"name"`
+// ---------------------------------------------------------------------------
+// Service services models
+// ---------------------------------------------------------------------------
+
+// ServiceServicesResourceModel defines the model for the qrator_service_services resource.
+type ServiceServicesResourceModel struct {
+	ServiceID          types.Int64           `tfsdk:"service_id"`
+	DNS                []ServiceDNSModel     `tfsdk:"dns"`
+	HTTP               []ServiceHTTPModel    `tfsdk:"http"`
+	ICMP               []ServiceICMPModel    `tfsdk:"icmp"`
+	NAT                []ServiceNATModel     `tfsdk:"nat"`
+	AnyIngressEgress   []ServiceAnyIEModel   `tfsdk:"any_ingress_egress"`
+	ProtoIngressEgress []ServiceProtoIEModel `tfsdk:"proto_ingress_egress"`
+	TCPIngressEgress   []ServiceTCPIEModel   `tfsdk:"tcp_ingress_egress"`
+	TCPEgress          []ServiceTCPEModel    `tfsdk:"tcp_egress"`
+	FragIngressEgress  []ServiceFragIEModel  `tfsdk:"frag_ingress_egress"`
+}
+
+// ServiceDNSModel represents a DNS service entry.
+type ServiceDNSModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	Port        types.Int64 `tfsdk:"port"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+}
+
+// ServiceHTTPModel represents an HTTP service entry (service entity).
+type ServiceHTTPModel struct {
+	ID                  types.Int64  `tfsdk:"id"`
+	Port                types.Int64  `tfsdk:"port"`
+	SSL                 types.Bool   `tfsdk:"ssl"`
+	HTTP2               types.Bool   `tfsdk:"http2"`
+	DefaultDrop         types.Bool   `tfsdk:"default_drop"`
+	UpstreamSSL         types.Bool   `tfsdk:"upstream_ssl"`
+	UpstreamSNIName     types.String `tfsdk:"upstream_sni_name"`
+	UpstreamSNIOverride types.Bool   `tfsdk:"upstream_sni_override"`
+}
+
+// ServiceICMPModel represents an ICMP service entry.
+type ServiceICMPModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+	RateLimit   types.Int64 `tfsdk:"rate_limit"`
+}
+
+// ServiceNATModel represents a NAT (tcp/udp) service entry (service entity — no upstream).
+type ServiceNATModel struct {
+	ID          types.Int64  `tfsdk:"id"`
+	Port        types.Int64  `tfsdk:"port"`
+	Proto       types.String `tfsdk:"proto"`
+	DefaultDrop types.Bool   `tfsdk:"default_drop"`
+	DropAmp     types.Bool   `tfsdk:"drop_amp"`
+	RateLimit   types.Int64  `tfsdk:"rate_limit"`
+}
+
+// ServiceAnyIEModel represents an any-ingress-egress service entry.
+type ServiceAnyIEModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+	DropAmp     types.Bool  `tfsdk:"drop_amp"`
+	RateLimit   types.Int64 `tfsdk:"rate_limit"`
+}
+
+// ServiceProtoIEModel represents a proto-ingress-egress service entry.
+type ServiceProtoIEModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	Proto       types.Int64 `tfsdk:"proto"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+	DropAmp     types.Bool  `tfsdk:"drop_amp"`
+	RateLimit   types.Int64 `tfsdk:"rate_limit"`
+}
+
+// ServiceTCPIEModel represents a tcp-ingress-egress service entry.
+type ServiceTCPIEModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+}
+
+// ServiceTCPEModel represents a tcp-egress service entry.
+type ServiceTCPEModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+}
+
+// ServiceFragIEModel represents a frag-ingress-egress service entry.
+type ServiceFragIEModel struct {
+	ID          types.Int64 `tfsdk:"id"`
+	DefaultDrop types.Bool  `tfsdk:"default_drop"`
+	RateLimit   types.Int64 `tfsdk:"rate_limit"`
 }

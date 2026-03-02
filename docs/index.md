@@ -34,10 +34,16 @@ provider "qrator" {
 | Resource | Description |
 |----------|-------------|
 | `qrator_domain` | Domain name management |
-| `qrator_domain_services` | Service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
-| `qrator_domain_sni` | SNI hostname-to-certificate mappings |
-| `qrator_domain_whitelist` | IP whitelist (allowed addresses) |
-| `qrator_domain_blacklist` | IP blacklist (blocked addresses) |
+| `qrator_domain_services` | Domain service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
+| `qrator_domain_sni` | Domain SNI hostname-to-certificate mappings |
+| `qrator_domain_whitelist` | Domain IP whitelist (allowed addresses) |
+| `qrator_domain_blacklist` | Domain IP blacklist (blocked addresses) |
+| `qrator_service` | Service name management |
+| `qrator_service_services` | Service list (DNS, HTTP, ICMP, NAT, ingress/egress types) |
+| `qrator_service_ips` | Service upstream IP addresses |
+| `qrator_service_sni` | Service SNI hostname-to-certificate mappings |
+| `qrator_service_whitelist` | Service IP whitelist (allowed addresses) |
+| `qrator_service_blacklist` | Service IP blacklist (blocked addresses) |
 | `qrator_cdn` | CDN configuration |
 | `qrator_client_certificate` | Client certificates (upload / Let's Encrypt) |
 

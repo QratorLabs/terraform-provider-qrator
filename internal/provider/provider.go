@@ -95,11 +95,21 @@ func (p *QratorProvider) DataSources(ctx context.Context) []func() datasource.Da
 func (p *QratorProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewCDNResource,
+		NewCDNSNIResource,
 		NewClientCertificateResource,
+		// Domain resources
 		NewDomainResource,
 		NewDomainServicesResource,
 		NewDomainSNIResource,
 		NewDomainWhitelistResource,
 		NewDomainBlacklistResource,
+		// Service resources
+		NewServiceResource,
+		NewServiceStatusResource,
+		NewServiceServicesResource,
+		NewServiceIPsResource,
+		NewServiceSNIResource,
+		NewServiceWhitelistResource,
+		NewServiceBlacklistResource,
 	}
 }

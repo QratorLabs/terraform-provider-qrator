@@ -14,7 +14,7 @@ Manages a CDN configuration for a domain in Qrator.
 ```terraform
 resource "qrator_cdn" "example" {
   domain_id     = 12345
-  cache_control = true
+  cache_control = "cdn"
   http2         = true
 
   access_control_allow_origin = ["https://(www\\.)?example\\.com"]
@@ -51,17 +51,6 @@ resource "qrator_cdn" "example" {
   ]
 
   white_uri = ["/api/.*", "/static/.*"]
-
-  sni = [
-    {
-      host        = "example.com"
-      certificate = qrator_client_certificate.cert.id
-    },
-    {
-      host        = "cdn.example.com"
-      certificate = qrator_client_certificate.cert.id
-    }
-  ]
 }
 ```
 
@@ -83,7 +72,7 @@ terraform import qrator_cdn.example 12345
 ### Optional
 
 - `access_control_allow_origin` (List of String) List of origin regex patterns. If the Origin header from the client matches one of the patterns, CDN adds an Access-Control-Allow-Origin header equal to the received Origin value.
-- `cache_control` (Boolean) Whether to enable cache control. Defaults to `false`.
+- `cache_control` (String) Controls cache TTL. `"cdn"` — CDN controls with default 6h; a number (`"7200"`–`"604800"`) — CDN controls with custom timeout in seconds; `"origin"` — origin Cache-Control/Expires headers are used. Defaults to `"cdn"`.
 - `cache_ignore_params` (Boolean) Whether to ignore query parameters when caching. Defaults to `false`.
 - `client_headers` (List of String) Headers that will be added to every response sent by CDN to client. Format: `header:value`.
 - `client_ip_header` (String) Name of the header containing the real client IP address.
@@ -95,7 +84,6 @@ terraform import qrator_cdn.example 12345
 - `client_no_cache` (Boolean) If enabled, no cache headers beside cache-control: no-cache are sent to client.
 - `compress_disabled` (List of String) List of compression algorithms to disable. Allowed values: `gzip`, `deflate`, `br`.
 - `http2` (Boolean) Enable CDN support for HTTP/2 (in addition to HTTP/1.1).
-- `sni` (Block List) SNI configuration for CDN. List of hostname-to-certificate mappings.
 - `white_uri` (List of String) List of allowed URI regex patterns. If set, requests not matching any pattern get a 404 response. Leave empty to disable.
 
 ### Nested Schema for `blocked_uri`
@@ -113,7 +101,3 @@ terraform import qrator_cdn.example 12345
 - `code` (Number, Required) HTTP status code from upstream to cache.
 - `timeout` (Number, Required) Timeout in milliseconds before the next request from the same client IP is allowed.
 
-### Nested Schema for `sni`
-
-- `host` (String, Required) The CDN hostname.
-- `certificate` (Number, Optional) The certificate ID from storage. Omit to disable TLS for this hostname.

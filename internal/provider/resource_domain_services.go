@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -24,6 +23,7 @@ import (
 var (
 	_ resource.Resource                   = &DomainServicesResource{}
 	_ resource.ResourceWithImportState    = &DomainServicesResource{}
+	_ resource.ResourceWithModifyPlan     = &DomainServicesResource{}
 	_ resource.ResourceWithValidateConfig = &DomainServicesResource{}
 )
 
@@ -149,8 +149,28 @@ func serviceIDAttr() schema.Int64Attribute {
 		Description: "Service entry ID assigned by the API.",
 		Computed:    true,
 		PlanModifiers: []planmodifier.Int64{
-			int64planmodifier.UseStateForUnknown(),
+			computedUnknownInt64{},
 		},
+	}
+}
+
+// computedUnknownInt64 ensures a Computed-only attribute is Unknown (not null)
+// in the plan when the user hasn't set it. Works around terraform-plugin-framework
+// not always promoting null to Unknown for Computed attributes inside
+// ListNestedAttribute elements.
+type computedUnknownInt64 struct{}
+
+func (m computedUnknownInt64) Description(_ context.Context) string {
+	return "Sets null to unknown for computed attributes."
+}
+
+func (m computedUnknownInt64) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m computedUnknownInt64) PlanModifyInt64(_ context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
+	if req.ConfigValue.IsNull() && resp.PlanValue.IsNull() {
+		resp.PlanValue = types.Int64Unknown()
 	}
 }
 
@@ -477,6 +497,98 @@ func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resourc
 }
 
 // ---------------------------------------------------------------------------
+// ModifyPlan — match service entry IDs by composite key, not list index
+// ---------------------------------------------------------------------------
+
+func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+
+	var plan, state DomainServicesResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Build composite-key → ID map from state.
+	idByKey := make(map[string]int64)
+	for i := range state.HTTP {
+		e := &state.HTTP[i]
+		if !e.ID.IsNull() && !e.ID.IsUnknown() {
+			idByKey[compositeKeyHTTP(e.Port.ValueInt64())] = e.ID.ValueInt64()
+		}
+	}
+	for i := range state.NAT {
+		e := &state.NAT[i]
+		if !e.ID.IsNull() && !e.ID.IsUnknown() {
+			idByKey[compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64())] = e.ID.ValueInt64()
+		}
+	}
+	for i := range state.NATAll {
+		e := &state.NATAll[i]
+		if !e.ID.IsNull() && !e.ID.IsUnknown() {
+			idByKey[compositeKeyNATAll(e.Proto.ValueString())] = e.ID.ValueInt64()
+		}
+	}
+	for i := range state.TCPProxy {
+		e := &state.TCPProxy[i]
+		if !e.ID.IsNull() && !e.ID.IsUnknown() {
+			idByKey[compositeKeyTCPProxy(e.Port.ValueInt64())] = e.ID.ValueInt64()
+		}
+	}
+	for i := range state.WebSocket {
+		e := &state.WebSocket[i]
+		if !e.ID.IsNull() && !e.ID.IsUnknown() {
+			idByKey[compositeKeyWebSocket(e.Port.ValueInt64())] = e.ID.ValueInt64()
+		}
+	}
+
+	// Assign correct IDs to plan entries by composite key.
+	assignID := func(id *types.Int64, key string) {
+		if v, ok := idByKey[key]; ok {
+			*id = types.Int64Value(v)
+		} else {
+			*id = types.Int64Unknown()
+		}
+	}
+
+	for i := range plan.HTTP {
+		assignID(&plan.HTTP[i].ID, compositeKeyHTTP(plan.HTTP[i].Port.ValueInt64()))
+	}
+	for i := range plan.NAT {
+		assignID(&plan.NAT[i].ID, compositeKeyNAT(plan.NAT[i].Proto.ValueString(), plan.NAT[i].Port.ValueInt64()))
+	}
+	for i := range plan.NATAll {
+		assignID(&plan.NATAll[i].ID, compositeKeyNATAll(plan.NATAll[i].Proto.ValueString()))
+	}
+	for i := range plan.TCPProxy {
+		assignID(&plan.TCPProxy[i].ID, compositeKeyTCPProxy(plan.TCPProxy[i].Port.ValueInt64()))
+	}
+	for i := range plan.WebSocket {
+		assignID(&plan.WebSocket[i].ID, compositeKeyWebSocket(plan.WebSocket[i].Port.ValueInt64()))
+	}
+
+	// Set each list attribute as a whole.
+	if plan.HTTP != nil {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), plan.HTTP)...)
+	}
+	if plan.NAT != nil {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), plan.NAT)...)
+	}
+	if plan.NATAll != nil {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat_all"), plan.NATAll)...)
+	}
+	if plan.TCPProxy != nil {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcpproxy"), plan.TCPProxy)...)
+	}
+	if plan.WebSocket != nil {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("websocket"), plan.WebSocket)...)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ImportState
 // ---------------------------------------------------------------------------
 
@@ -762,23 +874,12 @@ func apiToServicesModel(entries []apiServiceEntry, m *DomainServicesResourceMode
 		}
 	}
 
-	sort.Slice(m.HTTP, func(i, j int) bool {
-		return m.HTTP[i].Port.ValueInt64() < m.HTTP[j].Port.ValueInt64()
-	})
-	sort.Slice(m.NAT, func(i, j int) bool {
-		ki := compositeKeyNAT(m.NAT[i].Proto.ValueString(), m.NAT[i].Port.ValueInt64())
-		kj := compositeKeyNAT(m.NAT[j].Proto.ValueString(), m.NAT[j].Port.ValueInt64())
-		return ki < kj
-	})
-	sort.Slice(m.NATAll, func(i, j int) bool {
-		return m.NATAll[i].Proto.ValueString() < m.NATAll[j].Proto.ValueString()
-	})
-	sort.Slice(m.TCPProxy, func(i, j int) bool {
-		return m.TCPProxy[i].Port.ValueInt64() < m.TCPProxy[j].Port.ValueInt64()
-	})
-	sort.Slice(m.WebSocket, func(i, j int) bool {
-		return m.WebSocket[i].Port.ValueInt64() < m.WebSocket[j].Port.ValueInt64()
-	})
+	// Sort each type by API-assigned ID for stable, deterministic order.
+	sortByID(m.HTTP, func(e *DomainServiceHTTPModel) int64 { return e.ID.ValueInt64() })
+	sortByID(m.NAT, func(e *DomainServiceNATModel) int64 { return e.ID.ValueInt64() })
+	sortByID(m.NATAll, func(e *DomainServiceNATAllModel) int64 { return e.ID.ValueInt64() })
+	sortByID(m.TCPProxy, func(e *DomainServiceTCPProxyModel) int64 { return e.ID.ValueInt64() })
+	sortByID(m.WebSocket, func(e *DomainServiceWSModel) int64 { return e.ID.ValueInt64() })
 }
 
 func apiToHTTPModel(e *apiServiceEntry) DomainServiceHTTPModel {

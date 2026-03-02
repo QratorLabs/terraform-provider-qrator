@@ -19,24 +19,30 @@ import (
 )
 
 var (
-	_ resource.Resource                   = &DomainSNIResource{}
-	_ resource.ResourceWithImportState    = &DomainSNIResource{}
-	_ resource.ResourceWithValidateConfig = &DomainSNIResource{}
+	_ resource.Resource                   = &SNIResource{}
+	_ resource.ResourceWithImportState    = &SNIResource{}
+	_ resource.ResourceWithValidateConfig = &SNIResource{}
 )
 
-type DomainSNIResource struct {
+// SNIResource manages SNI configuration for a domain or service.
+type SNIResource struct {
 	client *client.QratorClient
+	entity entityKind
 }
 
 func NewDomainSNIResource() resource.Resource {
-	return &DomainSNIResource{}
+	return &SNIResource{entity: entityDomain}
+}
+
+func NewServiceSNIResource() resource.Resource {
+	return &SNIResource{entity: entityService}
 }
 
 // ---------------------------------------------------------------------------
 // API types
 // ---------------------------------------------------------------------------
 
-type domainSNIEntry struct {
+type sniAPIEntry struct {
 	LinkID      int64   `json:"link_id"`
 	Port        int64   `json:"port"`
 	Hostname    *string `json:"hostname"`
@@ -48,16 +54,16 @@ type domainSNIEntry struct {
 // Metadata / Schema
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_domain_sni"
+func (r *SNIResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_" + r.entity.String() + "_sni"
 }
 
-func (r *DomainSNIResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *SNIResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages SNI configuration for a domain in Qrator.",
+		Description: fmt.Sprintf("Manages SNI configuration for a %s in Qrator.", r.entity),
 		Attributes: map[string]schema.Attribute{
-			"domain_id": schema.Int64Attribute{
-				Description: "The domain ID.",
+			r.entity.idField(): schema.Int64Attribute{
+				Description: fmt.Sprintf("The %s ID.", r.entity),
 				Required:    true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
@@ -76,7 +82,7 @@ func (r *DomainSNIResource) Schema(ctx context.Context, req resource.SchemaReque
 							},
 						},
 						"host": schema.StringAttribute{
-							Description: "The hostname, or null for the default domain certificate.",
+							Description: "The hostname, or null for the default certificate.",
 							Optional:    true,
 						},
 						"certificate": schema.Int64Attribute{
@@ -94,7 +100,7 @@ func (r *DomainSNIResource) Schema(ctx context.Context, req resource.SchemaReque
 // Configure
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *SNIResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -111,19 +117,19 @@ func (r *DomainSNIResource) Configure(ctx context.Context, req resource.Configur
 // ValidateConfig
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data DomainSNIResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+func (r *SNIResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var links types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("links"), &links)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if data.Links.IsNull() || data.Links.IsUnknown() {
+	if links.IsNull() || links.IsUnknown() {
 		return
 	}
 
-	var sniEntries []DomainSNIEntryModel
-	resp.Diagnostics.Append(data.Links.ElementsAs(ctx, &sniEntries, false)...)
+	var sniEntries []SNIEntryModel
+	resp.Diagnostics.Append(links.ElementsAs(ctx, &sniEntries, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -162,106 +168,117 @@ func (r *DomainSNIResource) ValidateConfig(ctx context.Context, req resource.Val
 // ImportState
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *SNIResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	id, err := strconv.ParseInt(req.ID, 10, 64)
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid import ID", "Expected numeric domain ID")
+		resp.Diagnostics.AddError("Invalid import ID", fmt.Sprintf("Expected numeric %s ID", r.entity))
 		return
 	}
-	resp.State.SetAttribute(ctx, path.Root("domain_id"), id)
+	resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), id)
 }
 
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan DomainSNIResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+func (r *SNIResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var links types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("links"), &links)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	domainID := plan.DomainID.ValueInt64()
-	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
+	id := entityID.ValueInt64()
+	apiPath := r.entity.apiPath(id)
 
-	var sniEntries []DomainSNIEntryModel
-	resp.Diagnostics.Append(plan.Links.ElementsAs(ctx, &sniEntries, false)...)
+	var sniEntries []SNIEntryModel
+	resp.Diagnostics.Append(links.ElementsAs(ctx, &sniEntries, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, err := r.domainWriteSNI(ctx, apiPath, sniEntries); err != nil {
+	if _, err := r.writeSNI(ctx, apiPath, sniEntries); err != nil {
 		resp.Diagnostics.AddError("Failed to set SNI", err.Error())
 		return
 	}
 
-	if err := r.readAndPopulate(ctx, domainID, &plan, &resp.Diagnostics); err != nil {
+	newLinks, err := r.readSNILinks(ctx, id, &resp.Diagnostics)
+	if err != nil {
 		resp.Diagnostics.AddError("Failed to read SNI after create", err.Error())
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("links"), newLinks)...)
 }
 
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state DomainSNIResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+func (r *SNIResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if err := r.readAndPopulate(ctx, state.DomainID.ValueInt64(), &state, &resp.Diagnostics); err != nil {
+	links, err := r.readSNILinks(ctx, entityID.ValueInt64(), &resp.Diagnostics)
+	if err != nil {
 		resp.Diagnostics.AddError("Failed to read SNI", err.Error())
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("links"), links)...)
 }
 
 // ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state DomainSNIResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+func (r *SNIResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var planLinks types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("links"), &planLinks)...)
+	var stateLinks types.List
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("links"), &stateLinks)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	domainID := plan.DomainID.ValueInt64()
-	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
+	id := entityID.ValueInt64()
+	apiPath := r.entity.apiPath(id)
 
-	if err := r.domainUpdateSNI(ctx, apiPath, plan.Links, state.Links, &resp.Diagnostics); err != nil {
+	if err := r.updateSNI(ctx, apiPath, planLinks, stateLinks, &resp.Diagnostics); err != nil {
 		return
 	}
 
-	if err := r.readAndPopulate(ctx, domainID, &plan, &resp.Diagnostics); err != nil {
+	links, err := r.readSNILinks(ctx, id, &resp.Diagnostics)
+	if err != nil {
 		resp.Diagnostics.AddError("Failed to read SNI after update", err.Error())
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("links"), links)...)
 }
 
 // ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
 
-func (r *DomainSNIResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state DomainSNIResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+func (r *SNIResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	apiPath := fmt.Sprintf("/request/domain/%d", state.DomainID.ValueInt64())
+	apiPath := r.entity.apiPath(entityID.ValueInt64())
 	if _, err := r.client.MakeRequest(ctx, apiPath, "sni_clear", nil); err != nil {
 		resp.Diagnostics.AddError("Failed to clear SNI on delete", err.Error())
 		return
@@ -272,47 +289,44 @@ func (r *DomainSNIResource) Delete(ctx context.Context, req resource.DeleteReque
 // Helpers
 // ---------------------------------------------------------------------------
 
-var domainSNIAttrTypes = map[string]attr.Type{
+var sniAttrTypes = map[string]attr.Type{
 	"link_id":     types.Int64Type,
 	"host":        types.StringType,
 	"certificate": types.Int64Type,
 }
 
-func domainSNIObjType() types.ObjectType {
-	return types.ObjectType{AttrTypes: domainSNIAttrTypes}
+func sniObjType() types.ObjectType {
+	return types.ObjectType{AttrTypes: sniAttrTypes}
 }
 
 // sniHostKey returns a string key for matching SNI entries by hostname.
 // Null hostname (default certificate) maps to the empty string.
-func sniHostKey(m *DomainSNIEntryModel) string {
+func sniHostKey(m *SNIEntryModel) string {
 	if m.Host.IsNull() {
 		return ""
 	}
 	return m.Host.ValueString()
 }
 
-func (r *DomainSNIResource) readAndPopulate(ctx context.Context, domainID int64, model *DomainSNIResourceModel, diags *diag.Diagnostics) error {
-	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
+func (r *SNIResource) readSNILinks(ctx context.Context, entityID int64, diags *diag.Diagnostics) (types.List, error) {
+	apiPath := r.entity.apiPath(entityID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, "sni_get", nil)
 	if err != nil {
-		return fmt.Errorf("sni_get failed: %w", err)
+		return types.ListNull(sniObjType()), fmt.Errorf("sni_get failed: %w", err)
 	}
 
-	var sniEntries []domainSNIEntry
+	var sniEntries []sniAPIEntry
 	if err := json.Unmarshal(v, &sniEntries); err != nil {
-		return fmt.Errorf("failed to parse SNI response: %w", err)
+		return types.ListNull(sniObjType()), fmt.Errorf("failed to parse SNI response: %w", err)
 	}
 
-	model.DomainID = types.Int64Value(domainID)
-	model.Links = domainSNIEntriesToList(ctx, sniEntries, diags)
-
-	tflog.Debug(ctx, fmt.Sprintf("Read domain %d SNI: %d entries", domainID, len(sniEntries)))
-	return nil
+	tflog.Debug(ctx, fmt.Sprintf("Read %s %d SNI: %d entries", r.entity, entityID, len(sniEntries)))
+	return entitySNIEntriesToList(ctx, sniEntries, diags), nil
 }
 
-// domainWriteSNI replaces the full SNI state via sni_set. Used on Create.
-func (r *DomainSNIResource) domainWriteSNI(ctx context.Context, apiPath string, entries []DomainSNIEntryModel) ([]domainSNIEntry, error) {
+// writeSNI replaces the full SNI state via sni_set. Used on Create.
+func (r *SNIResource) writeSNI(ctx context.Context, apiPath string, entries []SNIEntryModel) ([]sniAPIEntry, error) {
 	params := make([]map[string]interface{}, len(entries))
 	for i, e := range entries {
 		entry := map[string]interface{}{
@@ -332,17 +346,17 @@ func (r *DomainSNIResource) domainWriteSNI(ctx context.Context, apiPath string, 
 		return nil, fmt.Errorf("sni_set failed: %w", err)
 	}
 
-	var resp []domainSNIEntry
+	var resp []sniAPIEntry
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return nil, fmt.Errorf("failed to parse sni_set response: %w", err)
 	}
 	return resp, nil
 }
 
-// domainUpdateSNI performs an incremental SNI update using sni_link_add and
+// updateSNI performs an incremental SNI update using sni_link_add and
 // sni_link_remove when state has link_ids.
-func (r *DomainSNIResource) domainUpdateSNI(ctx context.Context, apiPath string, plan, state types.List, diags *diag.Diagnostics) error {
-	var planEntries, stateEntries []DomainSNIEntryModel
+func (r *SNIResource) updateSNI(ctx context.Context, apiPath string, plan, state types.List, diags *diag.Diagnostics) error {
+	var planEntries, stateEntries []SNIEntryModel
 
 	d := plan.ElementsAs(ctx, &planEntries, false)
 	diags.Append(d...)
@@ -359,20 +373,20 @@ func (r *DomainSNIResource) domainUpdateSNI(ctx context.Context, apiPath string,
 	}
 
 	// Build lookup: hostname → state entry (with link_id).
-	stateByHost := make(map[string]*DomainSNIEntryModel, len(stateEntries))
+	stateByHost := make(map[string]*SNIEntryModel, len(stateEntries))
 	for i := range stateEntries {
 		stateByHost[sniHostKey(&stateEntries[i])] = &stateEntries[i]
 	}
 
 	// Build lookup: hostname → plan entry.
-	planByHost := make(map[string]*DomainSNIEntryModel, len(planEntries))
+	planByHost := make(map[string]*SNIEntryModel, len(planEntries))
 	for i := range planEntries {
 		planByHost[sniHostKey(&planEntries[i])] = &planEntries[i]
 	}
 
 	// Compute diff.
-	var toRemove []int64            // link_ids to remove
-	var toAdd []DomainSNIEntryModel // entries to add/overwrite
+	var toRemove []int64       // link_ids to remove
+	var toAdd []SNIEntryModel  // entries to add/overwrite
 
 	// Entries in state but not in plan → remove.
 	for key, se := range stateByHost {
@@ -421,11 +435,11 @@ func (r *DomainSNIResource) domainUpdateSNI(ctx context.Context, apiPath string,
 	return nil
 }
 
-// domainSNIEntriesToList converts API SNI entries to a Terraform List value.
-func domainSNIEntriesToList(ctx context.Context, entries []domainSNIEntry, diags *diag.Diagnostics) types.List {
-	objType := domainSNIObjType()
+// entitySNIEntriesToList converts API SNI entries to a Terraform List value.
+func entitySNIEntriesToList(ctx context.Context, entries []sniAPIEntry, diags *diag.Diagnostics) types.List {
+	objType := sniObjType()
 
-	models := make([]DomainSNIEntryModel, len(entries))
+	models := make([]SNIEntryModel, len(entries))
 	for i, e := range entries {
 		models[i].LinkID = types.Int64Value(e.LinkID)
 		if e.Hostname != nil {
@@ -438,7 +452,7 @@ func domainSNIEntriesToList(ctx context.Context, entries []domainSNIEntry, diags
 
 	elems := make([]attr.Value, len(models))
 	for i, m := range models {
-		obj, d := types.ObjectValueFrom(ctx, domainSNIAttrTypes, m)
+		obj, d := types.ObjectValueFrom(ctx, sniAttrTypes, m)
 		diags.Append(d...)
 		if diags.HasError() {
 			return types.ListNull(objType)

@@ -22,7 +22,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Generic IP list resource (whitelist / blacklist)
+// Generic IP list resource (whitelist / blacklist) for domain or service
 // ---------------------------------------------------------------------------
 
 type ipListKind string
@@ -42,11 +42,19 @@ func (k ipListKind) methodFlush() string  { return string(k) + "_flush" }
 // ---------------------------------------------------------------------------
 
 func NewDomainWhitelistResource() resource.Resource {
-	return &DomainIPListResource{kind: ipListWhitelist}
+	return &IPListResource{entity: entityDomain, kind: ipListWhitelist}
 }
 
 func NewDomainBlacklistResource() resource.Resource {
-	return &DomainIPListResource{kind: ipListBlacklist}
+	return &IPListResource{entity: entityDomain, kind: ipListBlacklist}
+}
+
+func NewServiceWhitelistResource() resource.Resource {
+	return &IPListResource{entity: entityService, kind: ipListWhitelist}
+}
+
+func NewServiceBlacklistResource() resource.Resource {
+	return &IPListResource{entity: entityService, kind: ipListBlacklist}
 }
 
 // ---------------------------------------------------------------------------
@@ -54,13 +62,14 @@ func NewDomainBlacklistResource() resource.Resource {
 // ---------------------------------------------------------------------------
 
 var (
-	_ resource.Resource                   = &DomainIPListResource{}
-	_ resource.ResourceWithImportState    = &DomainIPListResource{}
-	_ resource.ResourceWithValidateConfig = &DomainIPListResource{}
+	_ resource.Resource                   = &IPListResource{}
+	_ resource.ResourceWithImportState    = &IPListResource{}
+	_ resource.ResourceWithValidateConfig = &IPListResource{}
 )
 
-type DomainIPListResource struct {
+type IPListResource struct {
 	client *client.QratorClient
+	entity entityKind
 	kind   ipListKind
 }
 
@@ -68,16 +77,16 @@ type DomainIPListResource struct {
 // Metadata / Schema
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_domain_" + string(r.kind)
+func (r *IPListResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_" + r.entity.String() + "_" + string(r.kind)
 }
 
-func (r *DomainIPListResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *IPListResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: fmt.Sprintf("Manages the %s for a domain in Qrator.", r.kind),
+		Description: fmt.Sprintf("Manages the %s for a %s in Qrator.", r.kind, r.entity),
 		Attributes: map[string]schema.Attribute{
-			"domain_id": schema.Int64Attribute{
-				Description: "The domain ID.",
+			r.entity.idField(): schema.Int64Attribute{
+				Description: fmt.Sprintf("The %s ID.", r.entity),
 				Required:    true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
@@ -89,7 +98,7 @@ func (r *DomainIPListResource) Schema(ctx context.Context, req resource.SchemaRe
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"ip": schema.StringAttribute{
-							Description: "IP address (e.g. 10.0.0.1).",
+							Description: "IP address (e.g. 203.0.113.1).",
 							Required:    true,
 						},
 						"ttl": schema.Int64Attribute{
@@ -116,7 +125,7 @@ func (r *DomainIPListResource) Schema(ctx context.Context, req resource.SchemaRe
 // Configure
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *IPListResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -133,15 +142,15 @@ func (r *DomainIPListResource) Configure(ctx context.Context, req resource.Confi
 // ValidateConfig
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data DomainIPListResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+func (r *IPListResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var entries []IPListEntryModel
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("entries"), &entries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	seen := make(map[string]bool)
-	for i, e := range data.Entries {
+	for i, e := range entries {
 		if e.IP.IsUnknown() {
 			continue
 		}
@@ -158,84 +167,94 @@ func (r *DomainIPListResource) ValidateConfig(ctx context.Context, req resource.
 // ImportState
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *IPListResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	id, err := strconv.ParseInt(req.ID, 10, 64)
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid import ID", "Expected numeric domain ID")
+		resp.Diagnostics.AddError("Invalid import ID", fmt.Sprintf("Expected numeric %s ID", r.entity))
 		return
 	}
-	resp.State.SetAttribute(ctx, path.Root("domain_id"), id)
+	resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), id)
 }
 
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan DomainIPListResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var entries []IPListEntryModel
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("entries"), &entries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	r.syncEntries(ctx, plan.DomainID.ValueInt64(), plan.Entries, &resp.Diagnostics)
+	r.syncEntries(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 }
 
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state DomainIPListResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var stateEntries []IPListEntryModel
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("entries"), &stateEntries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if err := r.readAndPopulate(ctx, state.DomainID.ValueInt64(), &state, &resp.Diagnostics); err != nil {
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), stateEntries, &resp.Diagnostics)
+	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries", err.Error())
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 }
 
 // ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan DomainIPListResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var entries []IPListEntryModel
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("entries"), &entries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	r.syncEntries(ctx, plan.DomainID.ValueInt64(), plan.Entries, &resp.Diagnostics)
+	r.syncEntries(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 }
 
 // ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state DomainIPListResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+func (r *IPListResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var entityID types.Int64
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	apiPath := fmt.Sprintf("/request/domain/%d", state.DomainID.ValueInt64())
+	apiPath := r.entity.apiPath(entityID.ValueInt64())
 	if _, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodFlush(), nil); err != nil {
 		resp.Diagnostics.AddError("Failed to flush entries", err.Error())
 		return
@@ -246,8 +265,8 @@ func (r *DomainIPListResource) Delete(ctx context.Context, req resource.DeleteRe
 // syncEntries — read current API state, compute diff, apply changes
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) syncEntries(ctx context.Context, domainID int64, desired []IPListEntryModel, diags *diag.Diagnostics) {
-	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
+func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, desired []IPListEntryModel, diags *diag.Diagnostics) {
+	apiPath := r.entity.apiPath(entityID)
 
 	// Read current API state.
 	v, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodGet(), []interface{}{"tuple"})
@@ -292,7 +311,7 @@ func (r *DomainIPListResource) syncEntries(ctx context.Context, domainID int64, 
 		}
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("Sync domain %d %s: %d to remove, %d to add", domainID, r.kind, len(toRemove), len(toAdd)))
+	tflog.Debug(ctx, fmt.Sprintf("Sync %s %d %s: %d to remove, %d to add", r.entity, entityID, r.kind, len(toRemove), len(toAdd)))
 
 	if len(toRemove) > 0 {
 		if _, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodRemove(), toRemove); err != nil {
@@ -311,22 +330,22 @@ func (r *DomainIPListResource) syncEntries(ctx context.Context, domainID int64, 
 }
 
 // ---------------------------------------------------------------------------
-// readAndPopulate — read API entries, reconcile with current state
+// readAndReconcile — read API entries, reconcile with current state
 // ---------------------------------------------------------------------------
 
-func (r *DomainIPListResource) readAndPopulate(ctx context.Context, domainID int64, model *DomainIPListResourceModel, diags *diag.Diagnostics) error {
-	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
+func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, stateEntries []IPListEntryModel, diags *diag.Diagnostics) ([]IPListEntryModel, error) {
+	apiPath := r.entity.apiPath(entityID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodGet(), []interface{}{"tuple"})
 	if err != nil {
-		return fmt.Errorf("%s failed: %w", r.kind.methodGet(), err)
+		return nil, fmt.Errorf("%s failed: %w", r.kind.methodGet(), err)
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("Raw %s response: %s", r.kind.methodGet(), string(v)))
 
 	apiEntries, err := parseAPITuples(v)
 	if err != nil {
-		return fmt.Errorf("failed to parse %s response: %w", r.kind.methodGet(), err)
+		return nil, fmt.Errorf("failed to parse %s response: %w", r.kind.methodGet(), err)
 	}
 
 	// Index API entries by IP.
@@ -340,7 +359,7 @@ func (r *DomainIPListResource) readAndPopulate(ctx context.Context, domainID int
 	seen := make(map[string]bool, len(apiByIP))
 	entries := make([]IPListEntryModel, 0, len(apiByIP))
 
-	for _, se := range model.Entries {
+	for _, se := range stateEntries {
 		ip := se.IP.ValueString()
 		if ae, ok := apiByIP[ip]; ok {
 			entries = append(entries, ae)
@@ -356,11 +375,8 @@ func (r *DomainIPListResource) readAndPopulate(ctx context.Context, domainID int
 		}
 	}
 
-	model.DomainID = types.Int64Value(domainID)
-	model.Entries = entries
-
-	tflog.Debug(ctx, fmt.Sprintf("Read domain %d %s: %d entries (API: %d)", domainID, r.kind, len(entries), len(apiEntries)))
-	return nil
+	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d entries (API: %d)", r.entity, entityID, r.kind, len(entries), len(apiEntries)))
+	return entries, nil
 }
 
 // ---------------------------------------------------------------------------

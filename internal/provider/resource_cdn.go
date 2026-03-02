@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -52,11 +53,11 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 				ElementType: types.StringType,
 			},
-			"cache_control": schema.BoolAttribute{
-				Description: "If enabled, requests to upstream are governed by the expires and cache-control headers.",
+			"cache_control": schema.StringAttribute{
+				Description: `Controls cache TTL. "cdn" — CDN controls with default 6h; a number (7200–604800) — CDN controls with custom timeout in seconds; "origin" — origin Cache-Control/Expires headers are used.`,
 				Optional:    true,
 				Computed:    true,
-				Default:     booldefault.StaticBool(false),
+				Default:     stringdefault.StaticString("cdn"),
 			},
 			"client_no_cache": schema.BoolAttribute{
 				Description: "If enabled, no cache headers beside cache-control: no-cache are sent to client.",
@@ -92,23 +93,6 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
-			},
-			"sni": schema.ListNestedAttribute{
-				Description: "SNI configuration for CDN. List of hostname-to-certificate mappings.",
-				Optional:    true,
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"host": schema.StringAttribute{
-							Description: "The CDN hostname.",
-							Required:    true,
-						},
-						"certificate": schema.Int64Attribute{
-							Description: "The certificate ID from storage, or null to disable TLS for this hostname.",
-							Optional:    true,
-						},
-					},
-				},
 			},
 			"blocked_uri": schema.ListNestedAttribute{
 				Description: "List of URI patterns to block. Each entry specifies a regex pattern and an HTTP response code.",
@@ -248,8 +232,9 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 	// cache_control
 	if !plan.CacheControl.IsNull() && !plan.CacheControl.IsUnknown() &&
-		(state.CacheControl.IsNull() || plan.CacheControl.ValueBool() != state.CacheControl.ValueBool()) {
-		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_control_set", plan.CacheControl.ValueBool()); err != nil {
+		(state.CacheControl.IsNull() || plan.CacheControl.ValueString() != state.CacheControl.ValueString()) {
+		param := cacheControlToAPI(plan.CacheControl.ValueString())
+		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_control_set", param); err != nil {
 			resp.Diagnostics.AddError("Failed to update cache_control", err.Error())
 			return
 		}
@@ -355,13 +340,6 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// sni
-	if !plan.SNI.IsNull() && !plan.SNI.IsUnknown() {
-		if err := r.updateSNI(ctx, apiPath, plan.SNI, state.SNI, &resp.Diagnostics); err != nil {
-			return
-		}
-	}
-
 	// blocked_uri
 	if !plan.BlockedURI.IsNull() && !plan.BlockedURI.IsUnknown() {
 		if err := r.updateBlockedURI(ctx, apiPath, plan.BlockedURI, state.BlockedURI, &resp.Diagnostics); err != nil {
@@ -396,7 +374,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 	var (
 		accessControlAllowOrigin []string
-		cacheControl             bool
+		cacheControlRaw          json.RawMessage
 		redirectCode             *int64
 		clientNoCache            bool
 		cacheIgnoreParams        bool
@@ -407,7 +385,6 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		cacheErrors              []cdnCacheErrorEntry
 		cacheErrorsPermanent     []cdnCacheErrorEntry
 		compressDisabled         []string
-		sniEntries               []cdnSNIEntry
 		blockedURIEntries        []cdnBlockedURIEntry
 		whiteURI                 []string
 	)
@@ -427,7 +404,8 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		if err != nil {
 			return err
 		}
-		return json.Unmarshal(v, &cacheControl)
+		cacheControlRaw = v
+		return nil
 	})
 
 	g.Go(func() error {
@@ -516,14 +494,6 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	})
 
 	g.Go(func() error {
-		v, err := r.client.MakeRequest(gctx, apiPath, "sni_get", nil)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(v, &sniEntries)
-	})
-
-	g.Go(func() error {
 		v, err := r.client.MakeRequest(gctx, apiPath, "blocked_uri_get", nil)
 		if err != nil {
 			return err
@@ -545,7 +515,12 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	}
 
 	state.AccessControlAllowOrigin, _ = types.ListValueFrom(ctx, types.StringType, accessControlAllowOrigin)
-	state.CacheControl = types.BoolValue(cacheControl)
+	cc, err := parseCacheControl(cacheControlRaw)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to parse cache_control", err.Error())
+		return
+	}
+	state.CacheControl = types.StringValue(cc)
 	if redirectCode == nil {
 		state.RedirectCode = types.Int64Null()
 	} else {
@@ -580,11 +555,6 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	state.CompressDisabled, _ = types.ListValueFrom(ctx, types.StringType, compressDisabled)
 	state.CompressDisabled, _ = NormalizeStringList(ctx, state.CompressDisabled)
 
-	state.SNI = sniEntriesToList(ctx, sniEntries, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	state.BlockedURI = blockedURIEntriesToList(ctx, blockedURIEntries, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -594,109 +564,6 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
 
 	resp.State.Set(ctx, &state)
-}
-
-// cdnSNIEntry represents the API structure for a CDN SNI entry.
-type cdnSNIEntry struct {
-	Host        string `json:"host"`
-	Certificate *int64 `json:"certificate"`
-}
-
-// updateSNI calls sni_set if the SNI configuration has changed.
-func (r *CDNResource) updateSNI(ctx context.Context, apiPath string, plan, state types.List, diags *diag.Diagnostics) error {
-	var planEntries, stateEntries []CDNSNIEntryModel
-
-	d := plan.ElementsAs(ctx, &planEntries, false)
-	diags.Append(d...)
-	if diags.HasError() {
-		return fmt.Errorf("failed to parse plan SNI")
-	}
-
-	if !state.IsNull() && !state.IsUnknown() {
-		d = state.ElementsAs(ctx, &stateEntries, false)
-		diags.Append(d...)
-		if diags.HasError() {
-			return fmt.Errorf("failed to parse state SNI")
-		}
-	}
-
-	// Check if changed
-	if sniEntriesEqual(planEntries, stateEntries) {
-		return nil
-	}
-
-	params := make([]map[string]interface{}, len(planEntries))
-	for i, e := range planEntries {
-		entry := map[string]interface{}{
-			"host": e.Host.ValueString(),
-		}
-		if e.Certificate.IsNull() {
-			entry["certificate"] = nil
-		} else {
-			entry["certificate"] = e.Certificate.ValueInt64()
-		}
-		params[i] = entry
-	}
-
-	if _, err := r.client.MakeRequest(ctx, apiPath, "sni_set", params); err != nil {
-		diags.AddError("Failed to update sni", err.Error())
-		return err
-	}
-
-	return nil
-}
-
-// sniEntriesEqual compares two slices of CDNSNIEntryModel for equality.
-func sniEntriesEqual(a, b []CDNSNIEntryModel) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Host.ValueString() != b[i].Host.ValueString() {
-			return false
-		}
-		if a[i].Certificate.IsNull() != b[i].Certificate.IsNull() {
-			return false
-		}
-		if !a[i].Certificate.IsNull() && a[i].Certificate.ValueInt64() != b[i].Certificate.ValueInt64() {
-			return false
-		}
-	}
-	return true
-}
-
-// sniEntriesToList converts API SNI entries to a Terraform List value.
-func sniEntriesToList(ctx context.Context, entries []cdnSNIEntry, diags *diag.Diagnostics) types.List {
-	models := make([]CDNSNIEntryModel, len(entries))
-	for i, e := range entries {
-		models[i] = CDNSNIEntryModel{
-			Host: types.StringValue(e.Host),
-		}
-		if e.Certificate != nil {
-			models[i].Certificate = types.Int64Value(*e.Certificate)
-		} else {
-			models[i].Certificate = types.Int64Null()
-		}
-	}
-
-	sniAttrTypes := map[string]attr.Type{
-		"host":        types.StringType,
-		"certificate": types.Int64Type,
-	}
-
-	elems := make([]attr.Value, len(models))
-	for i, m := range models {
-		obj, d := types.ObjectValueFrom(ctx, sniAttrTypes, m)
-		diags.Append(d...)
-		if diags.HasError() {
-			return types.ListNull(types.ObjectType{AttrTypes: sniAttrTypes})
-		}
-		elems[i] = obj
-	}
-
-	list, d := types.ListValue(types.ObjectType{AttrTypes: sniAttrTypes}, elems)
-	diags.Append(d...)
-	return list
 }
 
 // cdnCacheErrorEntry represents the API structure for a CDN cache error entry.
@@ -877,4 +744,28 @@ func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, 
 	list, d := types.ListValue(types.ObjectType{AttrTypes: attrTypes}, elems)
 	diags.Append(d...)
 	return list
+}
+
+// parseCacheControl converts the API response for cache_control_get into a
+// normalised string for the Terraform state: "cdn", "origin", or a numeric
+// string like "21600". The API may return a JSON string or a JSON number.
+func parseCacheControl(raw json.RawMessage) (string, error) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil // "cdn" or "origin"
+	}
+	var n int64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return strconv.FormatInt(n, 10), nil
+	}
+	return "", fmt.Errorf("unexpected cache_control value: %s", string(raw))
+}
+
+// cacheControlToAPI converts the Terraform string value back to the type
+// expected by cache_control_set: "cdn"/"origin" as string, numeric as int.
+func cacheControlToAPI(v string) interface{} {
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+		return n
+	}
+	return v
 }
