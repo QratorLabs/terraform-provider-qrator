@@ -1,6 +1,6 @@
 # Terraform Provider for Qrator
 
-Terraform provider for managing [Qrator](https://qrator.net/) CDN and certificate resources.
+Terraform provider for managing [Qrator](https://qrator.net/) domains, services, CDN configurations, and client certificates.
 
 ## Requirements
 
@@ -42,28 +42,39 @@ export QRATOR_ENDPOINT="https://api.qrator.net"
 
 ## Resources
 
-- `qrator_cdn` — Manages CDN configuration for a domain (caching, headers, SNI).
-- `qrator_client_certificate` — Manages client TLS certificates (upload or Let's Encrypt).
+### Domain
 
-## Example
+| Resource | Description |
+|----------|-------------|
+| `qrator_domain` | Domain name and access policy |
+| `qrator_domain_services` | Domain service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
+| `qrator_domain_sni` | Domain SNI hostname-to-certificate mappings |
+| `qrator_domain_whitelist` | Domain IP whitelist (allowed addresses) |
+| `qrator_domain_blacklist` | Domain IP blacklist (blocked addresses) |
 
-```terraform
-resource "qrator_cdn" "example" {
-  domain_id     = 12345
-  cache_control = true
-}
+### Service
 
-resource "qrator_client_certificate" "cert" {
-  client_id = 67890
-  type      = "upload"
-  certificates = [
-    {
-      cert = file("cert.pem")
-      key  = file("key.pem")
-    }
-  ]
-}
-```
+| Resource | Description |
+|----------|-------------|
+| `qrator_service` | Service name and access policy |
+| `qrator_service_status` | Service status (online/offline) |
+| `qrator_service_services` | Service list (DNS, HTTP, ICMP, NAT, ingress/egress types) |
+| `qrator_service_ips` | Service upstream IP addresses |
+| `qrator_service_sni` | Service SNI hostname-to-certificate mappings |
+| `qrator_service_whitelist` | Service IP whitelist (allowed addresses) |
+| `qrator_service_blacklist` | Service IP blacklist (blocked addresses) |
+
+### CDN & Certificates
+
+| Resource | Description |
+|----------|-------------|
+| `qrator_cdn` | CDN configuration (caching, headers, compression) |
+| `qrator_cdn_sni` | CDN SNI hostname-to-certificate mappings |
+| `qrator_client_certificate` | Client TLS certificates (upload or Let's Encrypt) |
+
+## Examples
+
+See the [`examples/`](examples/) directory for complete configurations.
 
 ## Development
 
