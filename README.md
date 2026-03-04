@@ -82,6 +82,12 @@ See the [`examples/`](examples/) directory for complete configurations.
 go build -o terraform-provider-qrator .
 ```
 
+Run tests:
+
+```shell
+go test ./... -v -count=1
+```
+
 To use a local build, add to `~/.terraformrc`:
 
 ```hcl
