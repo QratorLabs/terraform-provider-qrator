@@ -30,6 +30,22 @@ resource "qrator_service_whitelist" "example" {
 }
 ```
 
+### Restrict access to whitelisted IPs only
+
+```terraform
+resource "qrator_service_whitelist" "restricted" {
+  service_id   = qrator_service.example.id
+  default_drop = true
+
+  entries = [
+    {
+      ip      = "203.0.113.10"
+      comment = "Office gateway"
+    }
+  ]
+}
+```
+
 ### Multiple IPs with TTL
 
 ```terraform
@@ -67,6 +83,10 @@ After import, run `terraform plan` to see the current state read from the API.
 
 - `service_id` (Number) The service ID. Changing this forces resource replacement.
 - `entries` (List of Object) IP entries in the whitelist.
+
+### Optional
+
+- `default_drop` (Boolean) Drop traffic from non-whitelisted IPs. When `true`, only whitelisted IPs are allowed. Defaults to `false`. When service is offline, the value cannot be read from the API — the provider preserves the last known value in state.
 
 ### Nested Schema for `entries`
 

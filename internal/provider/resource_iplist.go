@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -82,42 +83,53 @@ func (r *IPListResource) Metadata(ctx context.Context, req resource.MetadataRequ
 }
 
 func (r *IPListResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Description: fmt.Sprintf("Manages the %s for a %s in Qrator.", r.kind, r.entity),
-		Attributes: map[string]schema.Attribute{
-			r.entity.idField(): schema.Int64Attribute{
-				Description: fmt.Sprintf("The %s ID.", r.entity),
-				Required:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.RequiresReplace(),
-				},
+	attrs := map[string]schema.Attribute{
+		r.entity.idField(): schema.Int64Attribute{
+			Description: fmt.Sprintf("The %s ID.", r.entity),
+			Required:    true,
+			PlanModifiers: []planmodifier.Int64{
+				int64planmodifier.RequiresReplace(),
 			},
-			"entries": schema.ListNestedAttribute{
-				Description: fmt.Sprintf("IP entries in the %s.", r.kind),
-				Required:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"ip": schema.StringAttribute{
-							Description: "IP address (e.g. 203.0.113.1).",
-							Required:    true,
-						},
-						"ttl": schema.Int64Attribute{
-							Description: "Time to live in seconds. 0 means permanent.",
-							Optional:    true,
-							Computed:    true,
-							Default:     int64default.StaticInt64(0),
-							Validators:  []validator.Int64{int64validator.AtLeast(0)},
-						},
-						"comment": schema.StringAttribute{
-							Description: "Optional comment.",
-							Optional:    true,
-							Computed:    true,
-							Default:     stringdefault.StaticString(""),
-						},
+		},
+		"entries": schema.ListNestedAttribute{
+			Description: fmt.Sprintf("IP entries in the %s.", r.kind),
+			Required:    true,
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: map[string]schema.Attribute{
+					"ip": schema.StringAttribute{
+						Description: "IP address (e.g. 203.0.113.1).",
+						Required:    true,
+					},
+					"ttl": schema.Int64Attribute{
+						Description: "Time to live in seconds. 0 means permanent.",
+						Optional:    true,
+						Computed:    true,
+						Default:     int64default.StaticInt64(0),
+						Validators:  []validator.Int64{int64validator.AtLeast(0)},
+					},
+					"comment": schema.StringAttribute{
+						Description: "Optional comment.",
+						Optional:    true,
+						Computed:    true,
+						Default:     stringdefault.StaticString(""),
 					},
 				},
 			},
 		},
+	}
+
+	if r.kind == ipListWhitelist {
+		attrs["default_drop"] = schema.BoolAttribute{
+			Description: "Drop traffic from non-whitelisted IPs. When true, only whitelisted IPs are allowed.",
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+		}
+	}
+
+	resp.Schema = schema.Schema{
+		Description: fmt.Sprintf("Manages the %s for a %s in Qrator.", r.kind, r.entity),
+		Attributes:  attrs,
 	}
 }
 
@@ -196,6 +208,23 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
+
+	// Set default_drop for whitelist.
+	if r.kind == ipListWhitelist {
+		var defaultDrop types.Bool
+		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("default_drop"), &defaultDrop)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if !defaultDrop.IsNull() && !defaultDrop.IsUnknown() && defaultDrop.ValueBool() {
+			apiPath := r.entity.apiPath(entityID.ValueInt64())
+			if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{"drop"}); err != nil {
+				resp.Diagnostics.AddError("Failed to set default_drop", err.Error())
+				return
+			}
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("default_drop"), defaultDrop)...)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +248,34 @@ func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
+
+	// Read default_drop for whitelist.
+	if r.kind == ipListWhitelist {
+		apiPath := r.entity.apiPath(entityID.ValueInt64())
+		canRead := true
+		if r.entity == entityService {
+			statusRaw, err := r.client.MakeRequest(ctx, apiPath, "status_get", nil)
+			if err == nil {
+				var status string
+				json.Unmarshal(statusRaw, &status)
+				canRead = (status == "online")
+			}
+		}
+		if canRead {
+			policyRaw, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_get", nil)
+			if err != nil {
+				resp.Diagnostics.AddError("Failed to read default_drop", fmt.Sprintf("not_whitelisted_policy_get failed: %s", err))
+				return
+			}
+			var policy string
+			if err := json.Unmarshal(policyRaw, &policy); err != nil {
+				resp.Diagnostics.AddError("Failed to parse default_drop", err.Error())
+				return
+			}
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("default_drop"), types.BoolValue(policy == "drop"))...)
+		}
+		// When service is offline, default_drop stays at its current state value.
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +298,29 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
+
+	// Update default_drop for whitelist.
+	if r.kind == ipListWhitelist {
+		var planDrop, stateDrop types.Bool
+		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("default_drop"), &planDrop)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("default_drop"), &stateDrop)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if !planDrop.IsNull() && !planDrop.IsUnknown() &&
+			(stateDrop.IsNull() || planDrop.ValueBool() != stateDrop.ValueBool()) {
+			apiPath := r.entity.apiPath(entityID.ValueInt64())
+			apiVal := "accept"
+			if planDrop.ValueBool() {
+				apiVal = "drop"
+			}
+			if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{apiVal}); err != nil {
+				resp.Diagnostics.AddError("Failed to set default_drop", err.Error())
+				return
+			}
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("default_drop"), planDrop)...)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +335,14 @@ func (r *IPListResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	apiPath := r.entity.apiPath(entityID.ValueInt64())
+
+	// Reset policy for whitelist.
+	if r.kind == ipListWhitelist {
+		if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{"accept"}); err != nil {
+			tflog.Warn(ctx, fmt.Sprintf("Failed to reset not_whitelisted_policy: %s", err))
+		}
+	}
+
 	if _, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodFlush(), nil); err != nil {
 		resp.Diagnostics.AddError("Failed to flush entries", err.Error())
 		return

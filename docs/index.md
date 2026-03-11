@@ -33,15 +33,13 @@ provider "qrator" {
 
 | Resource | Description |
 |----------|-------------|
-| `qrator_domain` | Domain name management |
+| `qrator_domain` | Domain management (name, policy) |
 | `qrator_domain_services` | Domain service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
 | `qrator_domain_sni` | Domain SNI hostname-to-certificate mappings |
 | `qrator_domain_whitelist` | Domain IP whitelist (allowed addresses) |
 | `qrator_domain_blacklist` | Domain IP blacklist (blocked addresses) |
-| `qrator_service` | Service name management |
-| `qrator_service_status` | Service status (online/offline) |
+| `qrator_service` | Service management (name, policy, status, upstream IPs) |
 | `qrator_service_services` | Service list (DNS, HTTP, ICMP, NAT, ingress/egress types) |
-| `qrator_service_ips` | Service upstream IP addresses |
 | `qrator_service_sni` | Service SNI hostname-to-certificate mappings |
 | `qrator_service_whitelist` | Service IP whitelist (allowed addresses) |
 | `qrator_service_blacklist` | Service IP blacklist (blocked addresses) |

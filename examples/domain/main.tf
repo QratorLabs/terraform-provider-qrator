@@ -21,28 +21,21 @@ variable "endpoint" {
   default = "https://api.qrator.net"
 }
 
-variable "domain_id" {
+variable "client_id" {
   type = number
 }
 
-# --- Domain name and access policy ---
+# --- Domain ---
 
 resource "qrator_domain" "example" {
-  id   = var.domain_id
-  name = "example.com"
-}
-
-# Restrict access to whitelisted IPs only
-resource "qrator_domain" "restricted" {
-  id                     = var.domain_id
-  name                   = "internal.example.com"
-  not_whitelisted_policy = "drop"
+  client_id = var.client_id
+  name      = "example.com"
 }
 
 # --- Domain services ---
 
 resource "qrator_domain_services" "web" {
-  domain_id = var.domain_id
+  domain_id = qrator_domain.example.id
 
   http = [
     {
@@ -104,7 +97,7 @@ resource "qrator_domain_services" "web" {
 # --- Domain SNI ---
 
 resource "qrator_domain_sni" "example" {
-  domain_id = var.domain_id
+  domain_id = qrator_domain.example.id
 
   links = [
     {
@@ -120,7 +113,8 @@ resource "qrator_domain_sni" "example" {
 # --- Domain whitelist / blacklist ---
 
 resource "qrator_domain_whitelist" "example" {
-  domain_id = var.domain_id
+  domain_id    = qrator_domain.example.id
+  default_drop = true
 
   entries = [
     {
@@ -136,7 +130,7 @@ resource "qrator_domain_whitelist" "example" {
 }
 
 resource "qrator_domain_blacklist" "example" {
-  domain_id = var.domain_id
+  domain_id = qrator_domain.example.id
 
   entries = [
     {
@@ -149,8 +143,8 @@ resource "qrator_domain_blacklist" "example" {
 # --- Certificate (referenced by SNI) ---
 
 resource "qrator_client_certificate" "cert" {
-  client_id = 67890
+  client_id = var.client_id
   type      = "letsencrypt"
-  domain_id = var.domain_id
+  domain_id = qrator_domain.example.id
   hostnames = ["example.com", "www.example.com"]
 }

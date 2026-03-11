@@ -21,28 +21,23 @@ variable "endpoint" {
   default = "https://api.qrator.net"
 }
 
-variable "service_id" {
+variable "client_id" {
   type = number
 }
 
-# --- Service name and access policy ---
+# --- Service (name, status, upstream IPs) ---
 
 resource "qrator_service" "example" {
-  id   = var.service_id
-  name = "my-service"
-}
-
-# --- Service status ---
-
-resource "qrator_service_status" "example" {
-  service_id = var.service_id
-  status     = "online"
+  client_id = var.client_id
+  name      = "my-service"
+  ips       = ["192.0.2.1", "198.51.100.12"]
+  # status defaults to "online"
 }
 
 # --- Service services (full example) ---
 
 resource "qrator_service_services" "example" {
-  service_id = var.service_id
+  service_id = qrator_service.example.id
 
   dns = [
     {
@@ -102,21 +97,10 @@ resource "qrator_service_services" "example" {
   ]
 }
 
-# --- Service upstream IPs ---
-
-resource "qrator_service_ips" "example" {
-  service_id = var.service_id
-
-  ips = [
-    "192.0.2.1",
-    "198.51.100.12",
-  ]
-}
-
 # --- Service SNI ---
 
 resource "qrator_service_sni" "example" {
-  service_id = var.service_id
+  service_id = qrator_service.example.id
 
   links = [
     {
@@ -132,7 +116,7 @@ resource "qrator_service_sni" "example" {
 # --- Service whitelist / blacklist ---
 
 resource "qrator_service_whitelist" "example" {
-  service_id = var.service_id
+  service_id = qrator_service.example.id
 
   entries = [
     {
@@ -143,7 +127,7 @@ resource "qrator_service_whitelist" "example" {
 }
 
 resource "qrator_service_blacklist" "example" {
-  service_id = var.service_id
+  service_id = qrator_service.example.id
 
   entries = [
     {
@@ -156,7 +140,7 @@ resource "qrator_service_blacklist" "example" {
 # --- Certificate (referenced by SNI) ---
 
 resource "qrator_client_certificate" "svc_cert" {
-  client_id = 67890
+  client_id = var.client_id
   type      = "upload"
 
   certificates {
