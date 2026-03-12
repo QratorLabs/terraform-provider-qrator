@@ -167,16 +167,21 @@ type ServiceDNSModel struct {
 	DefaultDrop types.Bool  `tfsdk:"default_drop"`
 }
 
+// ServiceHTTPUpstreamModel represents upstream settings for an HTTP service entry.
+type ServiceHTTPUpstreamModel struct {
+	SSL         types.Bool   `tfsdk:"ssl"`
+	SNIName     types.String `tfsdk:"sni_name"`
+	SNIOverride types.Bool   `tfsdk:"sni_override"`
+}
+
 // ServiceHTTPModel represents an HTTP service entry (service entity).
 type ServiceHTTPModel struct {
-	ID                  types.Int64  `tfsdk:"id"`
-	Port                types.Int64  `tfsdk:"port"`
-	SSL                 types.Bool   `tfsdk:"ssl"`
-	HTTP2               types.Bool   `tfsdk:"http2"`
-	DefaultDrop         types.Bool   `tfsdk:"default_drop"`
-	UpstreamSSL         types.Bool   `tfsdk:"upstream_ssl"`
-	UpstreamSNIName     types.String `tfsdk:"upstream_sni_name"`
-	UpstreamSNIOverride types.Bool   `tfsdk:"upstream_sni_override"`
+	ID          types.Int64               `tfsdk:"id"`
+	Port        types.Int64               `tfsdk:"port"`
+	SSL         types.Bool                `tfsdk:"ssl"`
+	HTTP2       types.Bool                `tfsdk:"http2"`
+	DefaultDrop types.Bool                `tfsdk:"default_drop"`
+	Upstream    *ServiceHTTPUpstreamModel `tfsdk:"upstream"`
 }
 
 // ServiceICMPModel represents an ICMP service entry.

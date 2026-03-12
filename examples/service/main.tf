@@ -47,14 +47,18 @@ resource "qrator_service_services" "example" {
 
   http = [
     {
-      port         = 80
-      upstream_ssl = false
+      port = 80
+      upstream = {
+        ssl = false
+      }
     },
     {
-      port         = 443
-      ssl          = true
-      http2        = true
-      upstream_ssl = true
+      port  = 443
+      ssl   = true
+      http2 = true
+      upstream = {
+        ssl = true
+      }
     },
   ]
 

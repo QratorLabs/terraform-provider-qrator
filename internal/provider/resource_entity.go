@@ -230,9 +230,14 @@ func (r *EntityResource) Create(ctx context.Context, req resource.CreateRequest,
 	// Preserve client_id in state.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("client_id"), clientID)...)
 
-	// For service: set IPs in state.
+	// For service: set IPs and override status (API may return "pending" during transition).
 	if r.entity == entityService {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("ips"), ips)...)
+		statusVal := "online"
+		if !planStatus.IsNull() && !planStatus.IsUnknown() {
+			statusVal = planStatus.ValueString()
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("status"), statusVal)...)
 	}
 }
 
@@ -386,7 +391,8 @@ func (r *EntityResource) readAndSetState(ctx context.Context, entityID int64, st
 		return
 	}
 
-	// For service: read status.
+	// For service: read status. If API returns a transient value like "pending",
+	// preserve the previous state value.
 	if r.entity == entityService {
 		statusRaw, err := r.client.MakeRequest(ctx, apiPath, "status_get", nil)
 		if err != nil {
@@ -398,7 +404,9 @@ func (r *EntityResource) readAndSetState(ctx context.Context, entityID int64, st
 			diags.AddError("Failed to parse service status", err.Error())
 			return
 		}
-		diags.Append(state.SetAttribute(ctx, path.Root("status"), types.StringValue(status))...)
+		if status == "online" || status == "offline" {
+			diags.Append(state.SetAttribute(ctx, path.Root("status"), types.StringValue(status))...)
+		}
 		tflog.Debug(ctx, fmt.Sprintf("Read service %d status: %s", entityID, status))
 	}
 

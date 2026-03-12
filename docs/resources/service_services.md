@@ -37,10 +37,12 @@ resource "qrator_service_services" "web" {
 
   http = [
     {
-      port         = 443
-      ssl          = true
-      http2        = true
-      upstream_ssl = true
+      port  = 443
+      ssl   = true
+      http2 = true
+      upstream = {
+        ssl = true
+      }
     }
   ]
 }
@@ -62,14 +64,18 @@ resource "qrator_service_services" "full" {
 
   http = [
     {
-      port         = 80
-      upstream_ssl = false
+      port = 80
+      upstream = {
+        ssl = false
+      }
     },
     {
-      port         = 443
-      ssl          = true
-      http2        = true
-      upstream_ssl = true
+      port  = 443
+      ssl   = true
+      http2 = true
+      upstream = {
+        ssl = true
+      }
     }
   ]
 
@@ -161,19 +167,28 @@ Read-Only:
 Required:
 
 - `port` (Number) Listening port (1-65535).
-- `upstream_ssl` (Boolean) Enable SSL/TLS for upstream connections.
+- `upstream` (Object) Upstream connection settings. See below.
 
 Optional:
 
 - `ssl` (Boolean) Enable SSL/TLS on the frontend. Defaults to `false`.
 - `http2` (Boolean) Enable HTTP/2. Requires `ssl = true`. Defaults to `false`.
 - `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `upstream_sni_name` (String) SNI hostname for upstream TLS connections (max 255 chars).
-- `upstream_sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests. Defaults to `false`.
 
 Read-Only:
 
 - `id` (Number) Service entry ID assigned by the API.
+
+#### Nested Schema for `http.upstream`
+
+Required:
+
+- `ssl` (Boolean) Enable SSL/TLS for upstream connections.
+
+Optional:
+
+- `sni_name` (String) SNI hostname for upstream TLS connections (max 255 chars).
+- `sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests. Defaults to `false`.
 
 ### Nested Schema for `icmp`
 

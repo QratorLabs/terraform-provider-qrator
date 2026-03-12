@@ -169,20 +169,26 @@ func svcHTTPSchemaAttrs() map[string]schema.Attribute {
 			Optional:    true,
 			Computed:    true,
 		},
-		"upstream_ssl": schema.BoolAttribute{
-			Description: "Enable SSL/TLS for upstream connections.",
+		"upstream": schema.SingleNestedAttribute{
+			Description: "Upstream connection settings.",
 			Required:    true,
-		},
-		"upstream_sni_name": schema.StringAttribute{
-			Description: "SNI hostname for upstream TLS connections.",
-			Optional:    true,
-			Validators:  []validator.String{stringvalidator.LengthAtMost(255)},
-		},
-		"upstream_sni_override": schema.BoolAttribute{
-			Description: "Force use of sni_name as HOST header in upstream request.",
-			Optional:    true,
-			Computed:    true,
-			Default:     booldefault.StaticBool(false),
+			Attributes: map[string]schema.Attribute{
+				"ssl": schema.BoolAttribute{
+					Description: "Enable SSL/TLS for upstream connections.",
+					Required:    true,
+				},
+				"sni_name": schema.StringAttribute{
+					Description: "SNI hostname for upstream TLS connections.",
+					Optional:    true,
+					Validators:  []validator.String{stringvalidator.LengthAtMost(255)},
+				},
+				"sni_override": schema.BoolAttribute{
+					Description: "Force use of sni_name as HOST header in upstream request.",
+					Optional:    true,
+					Computed:    true,
+					Default:     booldefault.StaticBool(false),
+				},
+			},
 		},
 	}
 }
@@ -906,17 +912,20 @@ func apiToSvcHTTPModel(e *apiServiceEntry) ServiceHTTPModel {
 	if e.Upstream != nil {
 		var u apiServiceHTTPUpstream
 		if err := json.Unmarshal(*e.Upstream, &u); err == nil {
-			m.UpstreamSSL = types.BoolValue(u.SSL)
+			up := &ServiceHTTPUpstreamModel{
+				SSL: types.BoolValue(u.SSL),
+			}
 			if u.SNIName != nil {
-				m.UpstreamSNIName = types.StringValue(*u.SNIName)
+				up.SNIName = types.StringValue(*u.SNIName)
 			} else {
-				m.UpstreamSNIName = types.StringNull()
+				up.SNIName = types.StringNull()
 			}
 			if u.SNINameOverride != nil {
-				m.UpstreamSNIOverride = types.BoolValue(*u.SNINameOverride)
+				up.SNIOverride = types.BoolValue(*u.SNINameOverride)
 			} else {
-				m.UpstreamSNIOverride = types.BoolNull()
+				up.SNIOverride = types.BoolNull()
 			}
+			m.Upstream = up
 		}
 	}
 
@@ -1012,14 +1021,14 @@ func svcHTTPModelToAPI(m *ServiceHTTPModel) apiServiceEntry {
 	e.DefaultDrop = boolPtr(m.DefaultDrop)
 
 	u := apiServiceHTTPUpstream{
-		SSL: m.UpstreamSSL.ValueBool(),
+		SSL: m.Upstream.SSL.ValueBool(),
 	}
-	if !m.UpstreamSNIName.IsNull() && !m.UpstreamSNIName.IsUnknown() {
-		s := m.UpstreamSNIName.ValueString()
+	if !m.Upstream.SNIName.IsNull() && !m.Upstream.SNIName.IsUnknown() {
+		s := m.Upstream.SNIName.ValueString()
 		u.SNIName = &s
 	}
-	if !m.UpstreamSNIOverride.IsNull() && !m.UpstreamSNIOverride.IsUnknown() {
-		b := m.UpstreamSNIOverride.ValueBool()
+	if !m.Upstream.SNIOverride.IsNull() && !m.Upstream.SNIOverride.IsUnknown() {
+		b := m.Upstream.SNIOverride.ValueBool()
 		u.SNINameOverride = &b
 	}
 
