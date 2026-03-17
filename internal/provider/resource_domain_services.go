@@ -414,77 +414,116 @@ func (r *DomainServicesResource) Configure(ctx context.Context, req resource.Con
 // ---------------------------------------------------------------------------
 
 func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data DomainServicesResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	var httpList, natList, natAllList, tcpList, wsList types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("http"), &httpList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("nat"), &natList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("nat_all"), &natAllList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("tcpproxy"), &tcpList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("websocket"), &wsList)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	keys := make(map[string]bool)
 
-	for i, h := range data.HTTP {
-		if h.Port.IsUnknown() {
-			continue
+	if !httpList.IsUnknown() && !httpList.IsNull() {
+		var http []DomainServiceHTTPModel
+		resp.Diagnostics.Append(httpList.ElementsAs(ctx, &http, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := compositeKeyHTTP(h.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate HTTP service on port %d", h.Port.ValueInt64()))
-		}
-		keys[k] = true
+		for i, h := range http {
+			if h.Port.IsUnknown() {
+				continue
+			}
+			k := compositeKeyHTTP(h.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate HTTP service on port %d", h.Port.ValueInt64()))
+			}
+			keys[k] = true
 
-		if !h.SSL.IsNull() && !h.HTTP2.IsNull() && !h.SSL.ValueBool() && h.HTTP2.ValueBool() {
-			resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i).AtName("http2"),
-				"Invalid http2 setting", "http2 cannot be enabled when ssl is false")
+			if !h.SSL.IsNull() && !h.HTTP2.IsNull() && !h.SSL.ValueBool() && h.HTTP2.ValueBool() {
+				resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i).AtName("http2"),
+					"Invalid http2 setting", "http2 cannot be enabled when ssl is false")
+			}
 		}
 	}
 
-	for i, n := range data.NAT {
-		if n.Port.IsUnknown() || n.Proto.IsUnknown() {
-			continue
+	if !natList.IsUnknown() && !natList.IsNull() {
+		var nat []DomainServiceNATModel
+		resp.Diagnostics.Append(natList.ElementsAs(ctx, &nat, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := compositeKeyNAT(n.Proto.ValueString(), n.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("nat").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate NAT %s service on port %d", n.Proto.ValueString(), n.Port.ValueInt64()))
+		for i, n := range nat {
+			if n.Port.IsUnknown() || n.Proto.IsUnknown() {
+				continue
+			}
+			k := compositeKeyNAT(n.Proto.ValueString(), n.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("nat").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate NAT %s service on port %d", n.Proto.ValueString(), n.Port.ValueInt64()))
+			}
+			keys[k] = true
 		}
-		keys[k] = true
 	}
 
-	for i, n := range data.NATAll {
-		if n.Proto.IsUnknown() {
-			continue
+	if !natAllList.IsUnknown() && !natAllList.IsNull() {
+		var natAll []DomainServiceNATAllModel
+		resp.Diagnostics.Append(natAllList.ElementsAs(ctx, &natAll, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := compositeKeyNATAll(n.Proto.ValueString())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("nat_all").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate nat-all %s entry", n.Proto.ValueString()))
+		for i, n := range natAll {
+			if n.Proto.IsUnknown() {
+				continue
+			}
+			k := compositeKeyNATAll(n.Proto.ValueString())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("nat_all").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate nat-all %s entry", n.Proto.ValueString()))
+			}
+			keys[k] = true
 		}
-		keys[k] = true
 	}
 
-	for i, t := range data.TCPProxy {
-		if t.Port.IsUnknown() {
-			continue
+	if !tcpList.IsUnknown() && !tcpList.IsNull() {
+		var tcp []DomainServiceTCPProxyModel
+		resp.Diagnostics.Append(tcpList.ElementsAs(ctx, &tcp, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := compositeKeyTCPProxy(t.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("tcpproxy").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate tcpproxy service on port %d", t.Port.ValueInt64()))
+		for i, t := range tcp {
+			if t.Port.IsUnknown() {
+				continue
+			}
+			k := compositeKeyTCPProxy(t.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("tcpproxy").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate tcpproxy service on port %d", t.Port.ValueInt64()))
+			}
+			keys[k] = true
 		}
-		keys[k] = true
 	}
 
-	for i, w := range data.WebSocket {
-		if w.Port.IsUnknown() {
-			continue
+	if !wsList.IsUnknown() && !wsList.IsNull() {
+		var ws []DomainServiceWSModel
+		resp.Diagnostics.Append(wsList.ElementsAs(ctx, &ws, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := compositeKeyWebSocket(w.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("websocket").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate websocket service on port %d", w.Port.ValueInt64()))
+		for i, w := range ws {
+			if w.Port.IsUnknown() {
+				continue
+			}
+			k := compositeKeyWebSocket(w.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("websocket").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate websocket service on port %d", w.Port.ValueInt64()))
+			}
+			keys[k] = true
 		}
-		keys[k] = true
 	}
 }
 
@@ -497,47 +536,81 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		return
 	}
 
-	var plan, state DomainServicesResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	// Load state lists (always known — state values are never unknown).
+	var stateHTTP, stateNAT, stateNATAll, stateTCPProxy, stateWS types.List
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("http"), &stateHTTP)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("nat"), &stateNAT)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("nat_all"), &stateNATAll)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("tcpproxy"), &stateTCPProxy)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("websocket"), &stateWS)...)
+
+	// Load plan lists (may be unknown when referencing not-yet-computed values).
+	var planHTTP, planNAT, planNATAll, planTCPProxy, planWS types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("http"), &planHTTP)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("nat"), &planNAT)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("nat_all"), &planNATAll)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("tcpproxy"), &planTCPProxy)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("websocket"), &planWS)...)
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	// Build composite-key → ID map from state.
 	idByKey := make(map[string]int64)
-	for i := range state.HTTP {
-		e := &state.HTTP[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[compositeKeyHTTP(e.Port.ValueInt64())] = e.ID.ValueInt64()
+
+	if !stateHTTP.IsNull() {
+		var http []DomainServiceHTTPModel
+		resp.Diagnostics.Append(stateHTTP.ElementsAs(ctx, &http, false)...)
+		for i := range http {
+			if !http[i].ID.IsNull() && !http[i].ID.IsUnknown() {
+				idByKey[compositeKeyHTTP(http[i].Port.ValueInt64())] = http[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.NAT {
-		e := &state.NAT[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64())] = e.ID.ValueInt64()
+	if !stateNAT.IsNull() {
+		var nat []DomainServiceNATModel
+		resp.Diagnostics.Append(stateNAT.ElementsAs(ctx, &nat, false)...)
+		for i := range nat {
+			if !nat[i].ID.IsNull() && !nat[i].ID.IsUnknown() {
+				idByKey[compositeKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64())] = nat[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.NATAll {
-		e := &state.NATAll[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[compositeKeyNATAll(e.Proto.ValueString())] = e.ID.ValueInt64()
+	if !stateNATAll.IsNull() {
+		var natAll []DomainServiceNATAllModel
+		resp.Diagnostics.Append(stateNATAll.ElementsAs(ctx, &natAll, false)...)
+		for i := range natAll {
+			if !natAll[i].ID.IsNull() && !natAll[i].ID.IsUnknown() {
+				idByKey[compositeKeyNATAll(natAll[i].Proto.ValueString())] = natAll[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.TCPProxy {
-		e := &state.TCPProxy[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[compositeKeyTCPProxy(e.Port.ValueInt64())] = e.ID.ValueInt64()
+	if !stateTCPProxy.IsNull() {
+		var tcp []DomainServiceTCPProxyModel
+		resp.Diagnostics.Append(stateTCPProxy.ElementsAs(ctx, &tcp, false)...)
+		for i := range tcp {
+			if !tcp[i].ID.IsNull() && !tcp[i].ID.IsUnknown() {
+				idByKey[compositeKeyTCPProxy(tcp[i].Port.ValueInt64())] = tcp[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.WebSocket {
-		e := &state.WebSocket[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[compositeKeyWebSocket(e.Port.ValueInt64())] = e.ID.ValueInt64()
+	if !stateWS.IsNull() {
+		var ws []DomainServiceWSModel
+		resp.Diagnostics.Append(stateWS.ElementsAs(ctx, &ws, false)...)
+		for i := range ws {
+			if !ws[i].ID.IsNull() && !ws[i].ID.IsUnknown() {
+				idByKey[compositeKeyWebSocket(ws[i].Port.ValueInt64())] = ws[i].ID.ValueInt64()
+			}
 		}
 	}
 
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Assign correct IDs to plan entries by composite key.
+	// Skip unknown lists — they stay unknown in the plan.
 	assignID := func(id *types.Int64, key string) {
 		if v, ok := idByKey[key]; ok {
 			*id = types.Int64Value(v)
@@ -546,37 +619,45 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		}
 	}
 
-	for i := range plan.HTTP {
-		assignID(&plan.HTTP[i].ID, compositeKeyHTTP(plan.HTTP[i].Port.ValueInt64()))
+	if !planHTTP.IsUnknown() && !planHTTP.IsNull() {
+		var http []DomainServiceHTTPModel
+		resp.Diagnostics.Append(planHTTP.ElementsAs(ctx, &http, false)...)
+		for i := range http {
+			assignID(&http[i].ID, compositeKeyHTTP(http[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
 	}
-	for i := range plan.NAT {
-		assignID(&plan.NAT[i].ID, compositeKeyNAT(plan.NAT[i].Proto.ValueString(), plan.NAT[i].Port.ValueInt64()))
+	if !planNAT.IsUnknown() && !planNAT.IsNull() {
+		var nat []DomainServiceNATModel
+		resp.Diagnostics.Append(planNAT.ElementsAs(ctx, &nat, false)...)
+		for i := range nat {
+			assignID(&nat[i].ID, compositeKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
 	}
-	for i := range plan.NATAll {
-		assignID(&plan.NATAll[i].ID, compositeKeyNATAll(plan.NATAll[i].Proto.ValueString()))
+	if !planNATAll.IsUnknown() && !planNATAll.IsNull() {
+		var natAll []DomainServiceNATAllModel
+		resp.Diagnostics.Append(planNATAll.ElementsAs(ctx, &natAll, false)...)
+		for i := range natAll {
+			assignID(&natAll[i].ID, compositeKeyNATAll(natAll[i].Proto.ValueString()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat_all"), natAll)...)
 	}
-	for i := range plan.TCPProxy {
-		assignID(&plan.TCPProxy[i].ID, compositeKeyTCPProxy(plan.TCPProxy[i].Port.ValueInt64()))
+	if !planTCPProxy.IsUnknown() && !planTCPProxy.IsNull() {
+		var tcp []DomainServiceTCPProxyModel
+		resp.Diagnostics.Append(planTCPProxy.ElementsAs(ctx, &tcp, false)...)
+		for i := range tcp {
+			assignID(&tcp[i].ID, compositeKeyTCPProxy(tcp[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcpproxy"), tcp)...)
 	}
-	for i := range plan.WebSocket {
-		assignID(&plan.WebSocket[i].ID, compositeKeyWebSocket(plan.WebSocket[i].Port.ValueInt64()))
-	}
-
-	// Set each list attribute as a whole.
-	if plan.HTTP != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), plan.HTTP)...)
-	}
-	if plan.NAT != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), plan.NAT)...)
-	}
-	if plan.NATAll != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat_all"), plan.NATAll)...)
-	}
-	if plan.TCPProxy != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcpproxy"), plan.TCPProxy)...)
-	}
-	if plan.WebSocket != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("websocket"), plan.WebSocket)...)
+	if !planWS.IsUnknown() && !planWS.IsNull() {
+		var ws []DomainServiceWSModel
+		resp.Diagnostics.Append(planWS.ElementsAs(ctx, &ws, false)...)
+		for i := range ws {
+			assignID(&ws[i].ID, compositeKeyWebSocket(ws[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("websocket"), ws)...)
 	}
 }
 

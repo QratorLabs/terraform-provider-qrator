@@ -73,14 +73,16 @@ func TestSvcDNS_RoundTrip(t *testing.T) {
 
 func TestSvcHTTP_RoundTrip(t *testing.T) {
 	m := ServiceHTTPModel{
-		ID:                  types.Int64Value(2),
-		Port:                types.Int64Value(443),
-		SSL:                 types.BoolValue(true),
-		HTTP2:               types.BoolValue(true),
-		DefaultDrop:         types.BoolNull(),
-		UpstreamSSL:         types.BoolValue(true),
-		UpstreamSNIName:     types.StringNull(),
-		UpstreamSNIOverride: types.BoolValue(false),
+		ID:          types.Int64Value(2),
+		Port:        types.Int64Value(443),
+		SSL:         types.BoolValue(true),
+		HTTP2:       types.BoolValue(true),
+		DefaultDrop: types.BoolNull(),
+		Upstream: &ServiceHTTPUpstreamModel{
+			SSL:         types.BoolValue(true),
+			SNIName:     types.StringNull(),
+			SNIOverride: types.BoolValue(false),
+		},
 	}
 	api := svcHTTPModelToAPI(&m)
 	if api.Type != "http" {
@@ -90,8 +92,8 @@ func TestSvcHTTP_RoundTrip(t *testing.T) {
 	if back.Port.ValueInt64() != 443 {
 		t.Errorf("Port = %d, want 443", back.Port.ValueInt64())
 	}
-	if !back.UpstreamSSL.ValueBool() {
-		t.Error("UpstreamSSL should be true")
+	if back.Upstream == nil || !back.Upstream.SSL.ValueBool() {
+		t.Error("Upstream.SSL should be true")
 	}
 }
 
@@ -245,7 +247,7 @@ func TestBuildSvcServiceList_AllTypes(t *testing.T) {
 	m := &ServiceServicesResourceModel{
 		ServiceID: types.Int64Value(1),
 		DNS:       []ServiceDNSModel{{Port: types.Int64Value(53), DefaultDrop: types.BoolNull()}},
-		HTTP:      []ServiceHTTPModel{{Port: types.Int64Value(80), SSL: types.BoolValue(false), HTTP2: types.BoolValue(false), DefaultDrop: types.BoolNull(), UpstreamSSL: types.BoolValue(false), UpstreamSNIOverride: types.BoolValue(false)}},
+		HTTP:      []ServiceHTTPModel{{Port: types.Int64Value(80), SSL: types.BoolValue(false), HTTP2: types.BoolValue(false), DefaultDrop: types.BoolNull(), Upstream: &ServiceHTTPUpstreamModel{SSL: types.BoolValue(false), SNIName: types.StringNull(), SNIOverride: types.BoolValue(false)}}},
 		ICMP:      []ServiceICMPModel{{DefaultDrop: types.BoolNull(), RateLimit: types.Int64Null()}},
 		NAT:       []ServiceNATModel{{Port: types.Int64Value(25), Proto: types.StringValue("tcp"), DefaultDrop: types.BoolNull(), DropAmp: types.BoolNull(), RateLimit: types.Int64Null()}},
 		AnyIngressEgress:   []ServiceAnyIEModel{{DefaultDrop: types.BoolNull(), DropAmp: types.BoolNull(), RateLimit: types.Int64Null()}},

@@ -328,90 +328,161 @@ func (r *ServiceServicesResource) Configure(ctx context.Context, req resource.Co
 // ---------------------------------------------------------------------------
 
 func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data ServiceServicesResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	var dnsList, httpList, icmpList, natList, anyIEList, protoIEList, tcpIEList, tcpEList, fragIEList types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("dns"), &dnsList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("http"), &httpList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("icmp"), &icmpList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("nat"), &natList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("any_ingress_egress"), &anyIEList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("proto_ingress_egress"), &protoIEList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("tcp_ingress_egress"), &tcpIEList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("tcp_egress"), &tcpEList)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("frag_ingress_egress"), &fragIEList)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	keys := make(map[string]bool)
 
-	for i, d := range data.DNS {
-		if d.Port.IsUnknown() {
-			continue
+	if !dnsList.IsUnknown() && !dnsList.IsNull() {
+		var dns []ServiceDNSModel
+		resp.Diagnostics.Append(dnsList.ElementsAs(ctx, &dns, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := fmt.Sprintf("dns:%d", d.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("dns").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate DNS service on port %d", d.Port.ValueInt64()))
-		}
-		keys[k] = true
-	}
-
-	for i, h := range data.HTTP {
-		if h.Port.IsUnknown() {
-			continue
-		}
-		k := fmt.Sprintf("http:%d", h.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate HTTP service on port %d", h.Port.ValueInt64()))
-		}
-		keys[k] = true
-
-		if !h.SSL.IsNull() && !h.HTTP2.IsNull() && !h.SSL.ValueBool() && h.HTTP2.ValueBool() {
-			resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i).AtName("http2"),
-				"Invalid http2 setting", "http2 cannot be enabled when ssl is false")
+		for i, d := range dns {
+			if d.Port.IsUnknown() {
+				continue
+			}
+			k := fmt.Sprintf("dns:%d", d.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("dns").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate DNS service on port %d", d.Port.ValueInt64()))
+			}
+			keys[k] = true
 		}
 	}
 
-	if len(data.ICMP) > 1 {
-		resp.Diagnostics.AddAttributeError(path.Root("icmp"),
-			"Too many ICMP entries", "At most one ICMP service entry is allowed")
-	}
-
-	for i, n := range data.NAT {
-		if n.Port.IsUnknown() || n.Proto.IsUnknown() {
-			continue
+	if !httpList.IsUnknown() && !httpList.IsNull() {
+		var http []ServiceHTTPModel
+		resp.Diagnostics.Append(httpList.ElementsAs(ctx, &http, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := fmt.Sprintf("nat:%s:%d", n.Proto.ValueString(), n.Port.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("nat").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate NAT %s service on port %d", n.Proto.ValueString(), n.Port.ValueInt64()))
+		for i, h := range http {
+			if h.Port.IsUnknown() {
+				continue
+			}
+			k := fmt.Sprintf("http:%d", h.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate HTTP service on port %d", h.Port.ValueInt64()))
+			}
+			keys[k] = true
+
+			if !h.SSL.IsNull() && !h.HTTP2.IsNull() && !h.SSL.ValueBool() && h.HTTP2.ValueBool() {
+				resp.Diagnostics.AddAttributeError(path.Root("http").AtListIndex(i).AtName("http2"),
+					"Invalid http2 setting", "http2 cannot be enabled when ssl is false")
+			}
 		}
-		keys[k] = true
 	}
 
-	if len(data.AnyIngressEgress) > 1 {
-		resp.Diagnostics.AddAttributeError(path.Root("any_ingress_egress"),
-			"Too many entries", "At most one any-ingress-egress service entry is allowed")
-	}
-
-	for i, p := range data.ProtoIngressEgress {
-		if p.Proto.IsUnknown() {
-			continue
+	if !icmpList.IsUnknown() && !icmpList.IsNull() {
+		var icmp []ServiceICMPModel
+		resp.Diagnostics.Append(icmpList.ElementsAs(ctx, &icmp, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		k := fmt.Sprintf("proto-ie:%d", p.Proto.ValueInt64())
-		if keys[k] {
-			resp.Diagnostics.AddAttributeError(path.Root("proto_ingress_egress").AtListIndex(i),
-				"Duplicate service", fmt.Sprintf("Duplicate proto-ingress-egress service for proto %d", p.Proto.ValueInt64()))
+		if len(icmp) > 1 {
+			resp.Diagnostics.AddAttributeError(path.Root("icmp"),
+				"Too many ICMP entries", "At most one ICMP service entry is allowed")
 		}
-		keys[k] = true
 	}
 
-	if len(data.TCPIngressEgress) > 1 {
-		resp.Diagnostics.AddAttributeError(path.Root("tcp_ingress_egress"),
-			"Too many entries", "At most one tcp-ingress-egress service entry is allowed")
+	if !natList.IsUnknown() && !natList.IsNull() {
+		var nat []ServiceNATModel
+		resp.Diagnostics.Append(natList.ElementsAs(ctx, &nat, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for i, n := range nat {
+			if n.Port.IsUnknown() || n.Proto.IsUnknown() {
+				continue
+			}
+			k := fmt.Sprintf("nat:%s:%d", n.Proto.ValueString(), n.Port.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("nat").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate NAT %s service on port %d", n.Proto.ValueString(), n.Port.ValueInt64()))
+			}
+			keys[k] = true
+		}
 	}
 
-	if len(data.TCPEgress) > 1 {
-		resp.Diagnostics.AddAttributeError(path.Root("tcp_egress"),
-			"Too many entries", "At most one tcp-egress service entry is allowed")
+	if !anyIEList.IsUnknown() && !anyIEList.IsNull() {
+		var anyIE []ServiceAnyIEModel
+		resp.Diagnostics.Append(anyIEList.ElementsAs(ctx, &anyIE, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if len(anyIE) > 1 {
+			resp.Diagnostics.AddAttributeError(path.Root("any_ingress_egress"),
+				"Too many entries", "At most one any-ingress-egress service entry is allowed")
+		}
 	}
 
-	if len(data.FragIngressEgress) > 1 {
-		resp.Diagnostics.AddAttributeError(path.Root("frag_ingress_egress"),
-			"Too many entries", "At most one frag-ingress-egress service entry is allowed")
+	if !protoIEList.IsUnknown() && !protoIEList.IsNull() {
+		var protoIE []ServiceProtoIEModel
+		resp.Diagnostics.Append(protoIEList.ElementsAs(ctx, &protoIE, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for i, p := range protoIE {
+			if p.Proto.IsUnknown() {
+				continue
+			}
+			k := fmt.Sprintf("proto-ie:%d", p.Proto.ValueInt64())
+			if keys[k] {
+				resp.Diagnostics.AddAttributeError(path.Root("proto_ingress_egress").AtListIndex(i),
+					"Duplicate service", fmt.Sprintf("Duplicate proto-ingress-egress service for proto %d", p.Proto.ValueInt64()))
+			}
+			keys[k] = true
+		}
+	}
+
+	if !tcpIEList.IsUnknown() && !tcpIEList.IsNull() {
+		var tcpIE []ServiceTCPIEModel
+		resp.Diagnostics.Append(tcpIEList.ElementsAs(ctx, &tcpIE, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if len(tcpIE) > 1 {
+			resp.Diagnostics.AddAttributeError(path.Root("tcp_ingress_egress"),
+				"Too many entries", "At most one tcp-ingress-egress service entry is allowed")
+		}
+	}
+
+	if !tcpEList.IsUnknown() && !tcpEList.IsNull() {
+		var tcpE []ServiceTCPEModel
+		resp.Diagnostics.Append(tcpEList.ElementsAs(ctx, &tcpE, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if len(tcpE) > 1 {
+			resp.Diagnostics.AddAttributeError(path.Root("tcp_egress"),
+				"Too many entries", "At most one tcp-egress service entry is allowed")
+		}
+	}
+
+	if !fragIEList.IsUnknown() && !fragIEList.IsNull() {
+		var fragIE []ServiceFragIEModel
+		resp.Diagnostics.Append(fragIEList.ElementsAs(ctx, &fragIE, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if len(fragIE) > 1 {
+			resp.Diagnostics.AddAttributeError(path.Root("frag_ingress_egress"),
+				"Too many entries", "At most one frag-ingress-egress service entry is allowed")
+		}
 	}
 }
 
@@ -425,71 +496,125 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		return
 	}
 
-	var plan, state ServiceServicesResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	// Load state lists (always known — state values are never unknown).
+	var stateDNS, stateHTTP, stateICMP, stateNAT, stateAnyIE, stateProtoIE, stateTCPIE, stateTCPE, stateFragIE types.List
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("dns"), &stateDNS)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("http"), &stateHTTP)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("icmp"), &stateICMP)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("nat"), &stateNAT)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("any_ingress_egress"), &stateAnyIE)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("proto_ingress_egress"), &stateProtoIE)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("tcp_ingress_egress"), &stateTCPIE)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("tcp_egress"), &stateTCPE)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("frag_ingress_egress"), &stateFragIE)...)
+
+	// Load plan lists (may be unknown when referencing not-yet-computed values).
+	var planDNS, planHTTP, planICMP, planNAT, planAnyIE, planProtoIE, planTCPIE, planTCPE, planFragIE types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("dns"), &planDNS)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("http"), &planHTTP)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("icmp"), &planICMP)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("nat"), &planNAT)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("any_ingress_egress"), &planAnyIE)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("proto_ingress_egress"), &planProtoIE)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("tcp_ingress_egress"), &planTCPIE)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("tcp_egress"), &planTCPE)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("frag_ingress_egress"), &planFragIE)...)
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	// Build composite-key → ID map from state.
 	idByKey := make(map[string]int64)
-	for i := range state.DNS {
-		e := &state.DNS[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[fmt.Sprintf("dns:%d", e.Port.ValueInt64())] = e.ID.ValueInt64()
+
+	if !stateDNS.IsNull() {
+		var dns []ServiceDNSModel
+		resp.Diagnostics.Append(stateDNS.ElementsAs(ctx, &dns, false)...)
+		for i := range dns {
+			if !dns[i].ID.IsNull() && !dns[i].ID.IsUnknown() {
+				idByKey[fmt.Sprintf("dns:%d", dns[i].Port.ValueInt64())] = dns[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.HTTP {
-		e := &state.HTTP[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[fmt.Sprintf("http:%d", e.Port.ValueInt64())] = e.ID.ValueInt64()
+	if !stateHTTP.IsNull() {
+		var http []ServiceHTTPModel
+		resp.Diagnostics.Append(stateHTTP.ElementsAs(ctx, &http, false)...)
+		for i := range http {
+			if !http[i].ID.IsNull() && !http[i].ID.IsUnknown() {
+				idByKey[fmt.Sprintf("http:%d", http[i].Port.ValueInt64())] = http[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.ICMP {
-		e := &state.ICMP[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey["icmp"] = e.ID.ValueInt64()
+	if !stateICMP.IsNull() {
+		var icmp []ServiceICMPModel
+		resp.Diagnostics.Append(stateICMP.ElementsAs(ctx, &icmp, false)...)
+		for i := range icmp {
+			if !icmp[i].ID.IsNull() && !icmp[i].ID.IsUnknown() {
+				idByKey["icmp"] = icmp[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.NAT {
-		e := &state.NAT[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[fmt.Sprintf("nat:%s:%d", e.Proto.ValueString(), e.Port.ValueInt64())] = e.ID.ValueInt64()
+	if !stateNAT.IsNull() {
+		var nat []ServiceNATModel
+		resp.Diagnostics.Append(stateNAT.ElementsAs(ctx, &nat, false)...)
+		for i := range nat {
+			if !nat[i].ID.IsNull() && !nat[i].ID.IsUnknown() {
+				idByKey[fmt.Sprintf("nat:%s:%d", nat[i].Proto.ValueString(), nat[i].Port.ValueInt64())] = nat[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.AnyIngressEgress {
-		e := &state.AnyIngressEgress[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey["any-ingress-egress"] = e.ID.ValueInt64()
+	if !stateAnyIE.IsNull() {
+		var anyIE []ServiceAnyIEModel
+		resp.Diagnostics.Append(stateAnyIE.ElementsAs(ctx, &anyIE, false)...)
+		for i := range anyIE {
+			if !anyIE[i].ID.IsNull() && !anyIE[i].ID.IsUnknown() {
+				idByKey["any-ingress-egress"] = anyIE[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.ProtoIngressEgress {
-		e := &state.ProtoIngressEgress[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey[fmt.Sprintf("proto-ie:%d", e.Proto.ValueInt64())] = e.ID.ValueInt64()
+	if !stateProtoIE.IsNull() {
+		var protoIE []ServiceProtoIEModel
+		resp.Diagnostics.Append(stateProtoIE.ElementsAs(ctx, &protoIE, false)...)
+		for i := range protoIE {
+			if !protoIE[i].ID.IsNull() && !protoIE[i].ID.IsUnknown() {
+				idByKey[fmt.Sprintf("proto-ie:%d", protoIE[i].Proto.ValueInt64())] = protoIE[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.TCPIngressEgress {
-		e := &state.TCPIngressEgress[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey["tcp-ingress-egress"] = e.ID.ValueInt64()
+	if !stateTCPIE.IsNull() {
+		var tcpIE []ServiceTCPIEModel
+		resp.Diagnostics.Append(stateTCPIE.ElementsAs(ctx, &tcpIE, false)...)
+		for i := range tcpIE {
+			if !tcpIE[i].ID.IsNull() && !tcpIE[i].ID.IsUnknown() {
+				idByKey["tcp-ingress-egress"] = tcpIE[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.TCPEgress {
-		e := &state.TCPEgress[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey["tcp-egress"] = e.ID.ValueInt64()
+	if !stateTCPE.IsNull() {
+		var tcpE []ServiceTCPEModel
+		resp.Diagnostics.Append(stateTCPE.ElementsAs(ctx, &tcpE, false)...)
+		for i := range tcpE {
+			if !tcpE[i].ID.IsNull() && !tcpE[i].ID.IsUnknown() {
+				idByKey["tcp-egress"] = tcpE[i].ID.ValueInt64()
+			}
 		}
 	}
-	for i := range state.FragIngressEgress {
-		e := &state.FragIngressEgress[i]
-		if !e.ID.IsNull() && !e.ID.IsUnknown() {
-			idByKey["frag-ingress-egress"] = e.ID.ValueInt64()
+	if !stateFragIE.IsNull() {
+		var fragIE []ServiceFragIEModel
+		resp.Diagnostics.Append(stateFragIE.ElementsAs(ctx, &fragIE, false)...)
+		for i := range fragIE {
+			if !fragIE[i].ID.IsNull() && !fragIE[i].ID.IsUnknown() {
+				idByKey["frag-ingress-egress"] = fragIE[i].ID.ValueInt64()
+			}
 		}
 	}
 
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Assign correct IDs to plan entries by composite key.
+	// Skip unknown lists — they stay unknown in the plan.
 	assignID := func(id *types.Int64, key string) {
 		if v, ok := idByKey[key]; ok {
 			*id = types.Int64Value(v)
@@ -498,64 +623,78 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		}
 	}
 
-	for i := range plan.DNS {
-		assignID(&plan.DNS[i].ID, fmt.Sprintf("dns:%d", plan.DNS[i].Port.ValueInt64()))
+	if !planDNS.IsUnknown() && !planDNS.IsNull() {
+		var dns []ServiceDNSModel
+		resp.Diagnostics.Append(planDNS.ElementsAs(ctx, &dns, false)...)
+		for i := range dns {
+			assignID(&dns[i].ID, fmt.Sprintf("dns:%d", dns[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("dns"), dns)...)
 	}
-	for i := range plan.HTTP {
-		assignID(&plan.HTTP[i].ID, fmt.Sprintf("http:%d", plan.HTTP[i].Port.ValueInt64()))
+	if !planHTTP.IsUnknown() && !planHTTP.IsNull() {
+		var http []ServiceHTTPModel
+		resp.Diagnostics.Append(planHTTP.ElementsAs(ctx, &http, false)...)
+		for i := range http {
+			assignID(&http[i].ID, fmt.Sprintf("http:%d", http[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
 	}
-	for i := range plan.ICMP {
-		assignID(&plan.ICMP[i].ID, "icmp")
+	if !planICMP.IsUnknown() && !planICMP.IsNull() {
+		var icmp []ServiceICMPModel
+		resp.Diagnostics.Append(planICMP.ElementsAs(ctx, &icmp, false)...)
+		for i := range icmp {
+			assignID(&icmp[i].ID, "icmp")
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("icmp"), icmp)...)
 	}
-	for i := range plan.NAT {
-		assignID(&plan.NAT[i].ID, fmt.Sprintf("nat:%s:%d", plan.NAT[i].Proto.ValueString(), plan.NAT[i].Port.ValueInt64()))
+	if !planNAT.IsUnknown() && !planNAT.IsNull() {
+		var nat []ServiceNATModel
+		resp.Diagnostics.Append(planNAT.ElementsAs(ctx, &nat, false)...)
+		for i := range nat {
+			assignID(&nat[i].ID, fmt.Sprintf("nat:%s:%d", nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
 	}
-	for i := range plan.AnyIngressEgress {
-		assignID(&plan.AnyIngressEgress[i].ID, "any-ingress-egress")
+	if !planAnyIE.IsUnknown() && !planAnyIE.IsNull() {
+		var anyIE []ServiceAnyIEModel
+		resp.Diagnostics.Append(planAnyIE.ElementsAs(ctx, &anyIE, false)...)
+		for i := range anyIE {
+			assignID(&anyIE[i].ID, "any-ingress-egress")
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("any_ingress_egress"), anyIE)...)
 	}
-	for i := range plan.ProtoIngressEgress {
-		assignID(&plan.ProtoIngressEgress[i].ID, fmt.Sprintf("proto-ie:%d", plan.ProtoIngressEgress[i].Proto.ValueInt64()))
+	if !planProtoIE.IsUnknown() && !planProtoIE.IsNull() {
+		var protoIE []ServiceProtoIEModel
+		resp.Diagnostics.Append(planProtoIE.ElementsAs(ctx, &protoIE, false)...)
+		for i := range protoIE {
+			assignID(&protoIE[i].ID, fmt.Sprintf("proto-ie:%d", protoIE[i].Proto.ValueInt64()))
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("proto_ingress_egress"), protoIE)...)
 	}
-	for i := range plan.TCPIngressEgress {
-		assignID(&plan.TCPIngressEgress[i].ID, "tcp-ingress-egress")
+	if !planTCPIE.IsUnknown() && !planTCPIE.IsNull() {
+		var tcpIE []ServiceTCPIEModel
+		resp.Diagnostics.Append(planTCPIE.ElementsAs(ctx, &tcpIE, false)...)
+		for i := range tcpIE {
+			assignID(&tcpIE[i].ID, "tcp-ingress-egress")
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_ingress_egress"), tcpIE)...)
 	}
-	for i := range plan.TCPEgress {
-		assignID(&plan.TCPEgress[i].ID, "tcp-egress")
+	if !planTCPE.IsUnknown() && !planTCPE.IsNull() {
+		var tcpE []ServiceTCPEModel
+		resp.Diagnostics.Append(planTCPE.ElementsAs(ctx, &tcpE, false)...)
+		for i := range tcpE {
+			assignID(&tcpE[i].ID, "tcp-egress")
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_egress"), tcpE)...)
 	}
-	for i := range plan.FragIngressEgress {
-		assignID(&plan.FragIngressEgress[i].ID, "frag-ingress-egress")
+	if !planFragIE.IsUnknown() && !planFragIE.IsNull() {
+		var fragIE []ServiceFragIEModel
+		resp.Diagnostics.Append(planFragIE.ElementsAs(ctx, &fragIE, false)...)
+		for i := range fragIE {
+			assignID(&fragIE[i].ID, "frag-ingress-egress")
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("frag_ingress_egress"), fragIE)...)
 	}
-
-	// Set each list attribute as a whole (SetAttribute on sub-paths inside
-	// ListNestedAttribute doesn't work).
-	if plan.DNS != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("dns"), plan.DNS)...)
-	}
-	if plan.HTTP != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), plan.HTTP)...)
-	}
-	if plan.ICMP != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("icmp"), plan.ICMP)...)
-	}
-	if plan.NAT != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), plan.NAT)...)
-	}
-	if plan.AnyIngressEgress != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("any_ingress_egress"), plan.AnyIngressEgress)...)
-	}
-	if plan.ProtoIngressEgress != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("proto_ingress_egress"), plan.ProtoIngressEgress)...)
-	}
-	if plan.TCPIngressEgress != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_ingress_egress"), plan.TCPIngressEgress)...)
-	}
-	if plan.TCPEgress != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_egress"), plan.TCPEgress)...)
-	}
-	if plan.FragIngressEgress != nil {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("frag_ingress_egress"), plan.FragIngressEgress)...)
-	}
-
 }
 
 // ---------------------------------------------------------------------------

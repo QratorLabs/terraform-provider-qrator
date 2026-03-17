@@ -155,8 +155,13 @@ func (r *IPListResource) Configure(ctx context.Context, req resource.ConfigureRe
 // ---------------------------------------------------------------------------
 
 func (r *IPListResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var entriesList types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("entries"), &entriesList)...)
+	if resp.Diagnostics.HasError() || entriesList.IsUnknown() || entriesList.IsNull() {
+		return
+	}
 	var entries []IPListEntryModel
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("entries"), &entries)...)
+	resp.Diagnostics.Append(entriesList.ElementsAs(ctx, &entries, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
