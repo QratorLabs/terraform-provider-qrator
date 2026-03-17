@@ -70,6 +70,11 @@ export QRATOR_ENDPOINT="https://api.qrator.net"
 | `qrator_cdn_sni` | CDN SNI hostname-to-certificate mappings |
 | `qrator_client_certificate` | Client TLS certificates (upload or Let's Encrypt) |
 
+## Getting Started
+
+- [Creating a new domain or service from scratch](docs/guides/new-setup.md) — full lifecycle from resource creation through domain moderation to production configuration
+- [Importing existing resources into Terraform](docs/guides/import.md) — bring existing domains, services, certificates, and CDN configs under Terraform management without recreating them
+
 ## Examples
 
 See the [`examples/`](examples/) directory for complete configurations.
