@@ -51,6 +51,8 @@ resource "qrator_cdn" "example" {
   ]
 
   white_uri = ["/api/.*", "/static/.*"]
+
+  webp = 80
 }
 ```
 
@@ -84,6 +86,7 @@ terraform import qrator_cdn.example 12345
 - `client_no_cache` (Boolean) If enabled, no cache headers beside cache-control: no-cache are sent to client.
 - `compress_disabled` (List of String) List of compression algorithms to disable. Allowed values: `gzip`, `deflate`, `br`.
 - `http2` (Boolean) Enable CDN support for HTTP/2 (in addition to HTTP/1.1).
+- `webp` (Number) WebP image compression quality (0-100). `0` disables conversion, `1`-`100` enables on-the-fly conversion of images to WebP format with the specified quality.
 - `white_uri` (List of String) List of allowed URI regex patterns. If set, requests not matching any pattern get a 404 response. Leave empty to disable.
 
 ### Nested Schema for `blocked_uri`

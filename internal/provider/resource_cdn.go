@@ -162,6 +162,12 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 				ElementType: types.StringType,
 			},
+			"webp": schema.Int64Attribute{
+				Description: "WebP image compression quality (0-100). When set, enables on-the-fly conversion of images to WebP format. Omit or set to null to disable.",
+				Optional:    true,
+				Computed:    true,
+				Validators:  []validator.Int64{int64validator.Between(0, 100)},
+			},
 		},
 	}
 	tflog.Debug(ctx, "Defined CDN resource schema")
@@ -358,6 +364,15 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
+	// webp
+	if !plan.WebP.IsNull() && !plan.WebP.IsUnknown() &&
+		(state.WebP.IsNull() || plan.WebP.ValueInt64() != state.WebP.ValueInt64()) {
+		if _, err := r.client.MakeRequest(ctx, apiPath, "webp_set", plan.WebP.ValueInt64()); err != nil {
+			resp.Diagnostics.AddError("Failed to update webp", err.Error())
+			return
+		}
+	}
+
 	resp.State.Set(ctx, &plan)
 }
 
@@ -380,6 +395,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		cacheIgnoreParams        bool
 		clientHeaders            []string
 		clientIPHeader           *string
+		webp                     int64
 		upstreamHeaders          []string
 		http2                    bool
 		cacheErrors              []cdnCacheErrorEntry
@@ -509,6 +525,14 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return json.Unmarshal(v, &whiteURI)
 	})
 
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "webp_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &webp)
+	})
+
 	if err := g.Wait(); err != nil {
 		resp.Diagnostics.AddError("Failed to read CDN settings", err.Error())
 		return
@@ -562,6 +586,8 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 	state.WhiteURI, _ = types.ListValueFrom(ctx, types.StringType, whiteURI)
 	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
+
+	state.WebP = types.Int64Value(webp)
 
 	resp.State.Set(ctx, &state)
 }

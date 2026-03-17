@@ -27,6 +27,8 @@ type CDNModel struct {
 
 	BlockedURI types.List `tfsdk:"blocked_uri"`
 	WhiteURI   types.List `tfsdk:"white_uri"`
+
+	WebP types.Int64 `tfsdk:"webp"`
 }
 
 // CDNSNIEntryModel defines the model for a CDN SNI entry.
