@@ -229,7 +229,7 @@ func httpServiceSchemaAttrs() map[string]schema.Attribute {
 			Description: "Upstream servers.",
 			Required:    true,
 			NestedObject: schema.NestedAttributeObject{
-				Attributes: upstreamServerAttrs(true),
+				Attributes: upstreamServerAttrs(),
 			},
 		},
 	}
@@ -316,7 +316,7 @@ func tcpproxyServiceSchemaAttrs() map[string]schema.Attribute {
 			Description: "Upstream servers.",
 			Required:    true,
 			NestedObject: schema.NestedAttributeObject{
-				Attributes: upstreamServerAttrs(false),
+				Attributes: upstreamServerAttrs(),
 			},
 		},
 	}
@@ -343,7 +343,7 @@ func websocketServiceSchemaAttrs() map[string]schema.Attribute {
 			Description: "Upstream servers.",
 			Required:    true,
 			NestedObject: schema.NestedAttributeObject{
-				Attributes: upstreamServerAttrs(true),
+				Attributes: upstreamServerAttrs(),
 			},
 		},
 	}
@@ -357,17 +357,17 @@ func portAttr() schema.Int64Attribute {
 	}
 }
 
-func upstreamServerAttrs(allowDNS bool) map[string]schema.Attribute {
-	ipAttr := schema.StringAttribute{
-		Description: "Server IPv4 address.",
-	}
-	if allowDNS {
-		ipAttr.Optional = true
-	} else {
-		ipAttr.Required = true
-	}
-	attrs := map[string]schema.Attribute{
-		"ip": ipAttr,
+func upstreamServerAttrs() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"ip": schema.StringAttribute{
+			Description: "Server IPv4 address. Either ip or dns_record must be set.",
+			Optional:    true,
+		},
+		"dns_record": schema.StringAttribute{
+			Description: "DNS record (alternative to ip, min 4 chars).",
+			Optional:    true,
+			Validators:  []validator.String{stringvalidator.LengthAtLeast(4)},
+		},
 		"port": schema.Int64Attribute{
 			Description: "Server port (1-65535).",
 			Required:    true,
@@ -390,14 +390,6 @@ func upstreamServerAttrs(allowDNS bool) map[string]schema.Attribute {
 			Validators:  []validator.String{stringvalidator.LengthAtMost(255)},
 		},
 	}
-	if allowDNS {
-		attrs["dns_record"] = schema.StringAttribute{
-			Description: "DNS record (alternative to IP, min 4 chars).",
-			Optional:    true,
-			Validators:  []validator.String{stringvalidator.LengthAtLeast(4)},
-		}
-	}
-	return attrs
 }
 
 // ---------------------------------------------------------------------------
