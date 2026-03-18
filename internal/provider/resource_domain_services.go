@@ -310,6 +310,7 @@ func tcpproxyServiceSchemaAttrs() map[string]schema.Attribute {
 		"proxy_protocol": schema.Int64Attribute{
 			Description: "Proxy protocol version: 0, 1, or 2.",
 			Optional:    true,
+			Computed:    true,
 			Validators:  []validator.Int64{int64validator.OneOf(0, 1, 2)},
 		},
 		"upstreams": schema.ListNestedAttribute{

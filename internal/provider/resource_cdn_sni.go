@@ -167,6 +167,7 @@ func (r *CDNSNIResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	apiPath := fmt.Sprintf("/request/cdn/%d", state.DomainID.ValueInt64())
 	if _, err := r.client.MakeRequest(ctx, apiPath, "sni_set", []interface{}{}); err != nil {
 		resp.Diagnostics.AddError("Failed to clear CDN SNI", err.Error())
+		return
 	}
 }
 
