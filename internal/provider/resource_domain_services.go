@@ -625,7 +625,6 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range http {
 			assignID(&http[i].ID, compositeKeyHTTP(http[i].Port.ValueInt64()))
 		}
-		sortByIDUnknownLast(http, func(e *DomainServiceHTTPModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
 	}
 	if !planNAT.IsUnknown() && !planNAT.IsNull() {
@@ -634,7 +633,6 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range nat {
 			assignID(&nat[i].ID, compositeKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
 		}
-		sortByIDUnknownLast(nat, func(e *DomainServiceNATModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
 	}
 	if !planNATAll.IsUnknown() && !planNATAll.IsNull() {
@@ -643,7 +641,6 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range natAll {
 			assignID(&natAll[i].ID, compositeKeyNATAll(natAll[i].Proto.ValueString()))
 		}
-		sortByIDUnknownLast(natAll, func(e *DomainServiceNATAllModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat_all"), natAll)...)
 	}
 	if !planTCPProxy.IsUnknown() && !planTCPProxy.IsNull() {
@@ -652,7 +649,6 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range tcp {
 			assignID(&tcp[i].ID, compositeKeyTCPProxy(tcp[i].Port.ValueInt64()))
 		}
-		sortByIDUnknownLast(tcp, func(e *DomainServiceTCPProxyModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcpproxy"), tcp)...)
 	}
 	if !planWS.IsUnknown() && !planWS.IsNull() {
@@ -661,7 +657,6 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range ws {
 			assignID(&ws[i].ID, compositeKeyWebSocket(ws[i].Port.ValueInt64()))
 		}
-		sortByIDUnknownLast(ws, func(e *DomainServiceWSModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("websocket"), ws)...)
 	}
 }
@@ -732,12 +727,19 @@ func (r *DomainServicesResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	httpSet, natSet, natAllSet, tcpSet, wsSet := state.HTTP != nil, state.NAT != nil, state.NATAll != nil, state.TCPProxy != nil, state.WebSocket != nil
+	prevHTTP, prevNAT, prevNATAll, prevTCPProxy, prevWS := state.HTTP, state.NAT, state.NATAll, state.TCPProxy, state.WebSocket
+	httpSet, natSet, natAllSet, tcpSet, wsSet := prevHTTP != nil, prevNAT != nil, prevNATAll != nil, prevTCPProxy != nil, prevWS != nil
 
 	if err := r.readAndPopulate(ctx, state.DomainID.ValueInt64(), &state); err != nil {
 		resp.Diagnostics.AddError("Failed to read services", err.Error())
 		return
 	}
+
+	state.HTTP = reorderByPlanOrder(prevHTTP, state.HTTP, func(e *DomainServiceHTTPModel) string { return compositeKeyHTTP(e.Port.ValueInt64()) })
+	state.NAT = reorderByPlanOrder(prevNAT, state.NAT, func(e *DomainServiceNATModel) string { return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	state.NATAll = reorderByPlanOrder(prevNATAll, state.NATAll, func(e *DomainServiceNATAllModel) string { return compositeKeyNATAll(e.Proto.ValueString()) })
+	state.TCPProxy = reorderByPlanOrder(prevTCPProxy, state.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
+	state.WebSocket = reorderByPlanOrder(prevWS, state.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
 
 	preserveEmptySlices(&state, httpSet, natSet, natAllSet, tcpSet, wsSet)
 
@@ -756,7 +758,8 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	httpSet, natSet, natAllSet, tcpSet, wsSet := plan.HTTP != nil, plan.NAT != nil, plan.NATAll != nil, plan.TCPProxy != nil, plan.WebSocket != nil
+	planHTTP, planNAT, planNATAll, planTCPProxy, planWS := plan.HTTP, plan.NAT, plan.NATAll, plan.TCPProxy, plan.WebSocket
+	httpSet, natSet, natAllSet, tcpSet, wsSet := planHTTP != nil, planNAT != nil, planNATAll != nil, planTCPProxy != nil, planWS != nil
 
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
@@ -772,6 +775,12 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 		resp.Diagnostics.AddError("Failed to read services after update", err.Error())
 		return
 	}
+
+	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *DomainServiceHTTPModel) string { return compositeKeyHTTP(e.Port.ValueInt64()) })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *DomainServiceNATModel) string { return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.NATAll = reorderByPlanOrder(planNATAll, plan.NATAll, func(e *DomainServiceNATAllModel) string { return compositeKeyNATAll(e.Proto.ValueString()) })
+	plan.TCPProxy = reorderByPlanOrder(planTCPProxy, plan.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
+	plan.WebSocket = reorderByPlanOrder(planWS, plan.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
 
 	preserveEmptySlices(&plan, httpSet, natSet, natAllSet, tcpSet, wsSet)
 
