@@ -532,7 +532,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateDNS.ElementsAs(ctx, &dns, false)...)
 		for i := range dns {
 			if !dns[i].ID.IsNull() && !dns[i].ID.IsUnknown() {
-				idByKey[fmt.Sprintf("dns:%d", dns[i].Port.ValueInt64())] = dns[i].ID.ValueInt64()
+				idByKey[svcKeyDNS(dns[i].Port.ValueInt64())] = dns[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -541,7 +541,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateHTTP.ElementsAs(ctx, &http, false)...)
 		for i := range http {
 			if !http[i].ID.IsNull() && !http[i].ID.IsUnknown() {
-				idByKey[fmt.Sprintf("http:%d", http[i].Port.ValueInt64())] = http[i].ID.ValueInt64()
+				idByKey[svcKeyHTTP(http[i].Port.ValueInt64())] = http[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -550,7 +550,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateICMP.ElementsAs(ctx, &icmp, false)...)
 		for i := range icmp {
 			if !icmp[i].ID.IsNull() && !icmp[i].ID.IsUnknown() {
-				idByKey["icmp"] = icmp[i].ID.ValueInt64()
+				idByKey[svcKeyICMP()] = icmp[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -559,7 +559,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateNAT.ElementsAs(ctx, &nat, false)...)
 		for i := range nat {
 			if !nat[i].ID.IsNull() && !nat[i].ID.IsUnknown() {
-				idByKey[fmt.Sprintf("nat:%s:%d", nat[i].Proto.ValueString(), nat[i].Port.ValueInt64())] = nat[i].ID.ValueInt64()
+				idByKey[svcKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64())] = nat[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -568,7 +568,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateAnyIE.ElementsAs(ctx, &anyIE, false)...)
 		for i := range anyIE {
 			if !anyIE[i].ID.IsNull() && !anyIE[i].ID.IsUnknown() {
-				idByKey["any-ingress-egress"] = anyIE[i].ID.ValueInt64()
+				idByKey[svcKeyAnyIE()] = anyIE[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -577,7 +577,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateProtoIE.ElementsAs(ctx, &protoIE, false)...)
 		for i := range protoIE {
 			if !protoIE[i].ID.IsNull() && !protoIE[i].ID.IsUnknown() {
-				idByKey[fmt.Sprintf("proto-ie:%d", protoIE[i].Proto.ValueInt64())] = protoIE[i].ID.ValueInt64()
+				idByKey[svcKeyProtoIE(protoIE[i].Proto.ValueInt64())] = protoIE[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -586,7 +586,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateTCPIE.ElementsAs(ctx, &tcpIE, false)...)
 		for i := range tcpIE {
 			if !tcpIE[i].ID.IsNull() && !tcpIE[i].ID.IsUnknown() {
-				idByKey["tcp-ingress-egress"] = tcpIE[i].ID.ValueInt64()
+				idByKey[svcKeyTCPIE()] = tcpIE[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -595,7 +595,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateTCPE.ElementsAs(ctx, &tcpE, false)...)
 		for i := range tcpE {
 			if !tcpE[i].ID.IsNull() && !tcpE[i].ID.IsUnknown() {
-				idByKey["tcp-egress"] = tcpE[i].ID.ValueInt64()
+				idByKey[svcKeyTCPE()] = tcpE[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -604,7 +604,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		resp.Diagnostics.Append(stateFragIE.ElementsAs(ctx, &fragIE, false)...)
 		for i := range fragIE {
 			if !fragIE[i].ID.IsNull() && !fragIE[i].ID.IsUnknown() {
-				idByKey["frag-ingress-egress"] = fragIE[i].ID.ValueInt64()
+				idByKey[svcKeyFragIE()] = fragIE[i].ID.ValueInt64()
 			}
 		}
 	}
@@ -627,7 +627,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var dns []ServiceDNSModel
 		resp.Diagnostics.Append(planDNS.ElementsAs(ctx, &dns, false)...)
 		for i := range dns {
-			assignID(&dns[i].ID, fmt.Sprintf("dns:%d", dns[i].Port.ValueInt64()))
+			assignID(&dns[i].ID, svcKeyDNS(dns[i].Port.ValueInt64()))
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("dns"), dns)...)
 	}
@@ -635,7 +635,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var http []ServiceHTTPModel
 		resp.Diagnostics.Append(planHTTP.ElementsAs(ctx, &http, false)...)
 		for i := range http {
-			assignID(&http[i].ID, fmt.Sprintf("http:%d", http[i].Port.ValueInt64()))
+			assignID(&http[i].ID, svcKeyHTTP(http[i].Port.ValueInt64()))
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
 	}
@@ -643,7 +643,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var icmp []ServiceICMPModel
 		resp.Diagnostics.Append(planICMP.ElementsAs(ctx, &icmp, false)...)
 		for i := range icmp {
-			assignID(&icmp[i].ID, "icmp")
+			assignID(&icmp[i].ID, svcKeyICMP())
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("icmp"), icmp)...)
 	}
@@ -651,7 +651,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var nat []ServiceNATModel
 		resp.Diagnostics.Append(planNAT.ElementsAs(ctx, &nat, false)...)
 		for i := range nat {
-			assignID(&nat[i].ID, fmt.Sprintf("nat:%s:%d", nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
+			assignID(&nat[i].ID, svcKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
 	}
@@ -659,7 +659,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var anyIE []ServiceAnyIEModel
 		resp.Diagnostics.Append(planAnyIE.ElementsAs(ctx, &anyIE, false)...)
 		for i := range anyIE {
-			assignID(&anyIE[i].ID, "any-ingress-egress")
+			assignID(&anyIE[i].ID, svcKeyAnyIE())
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("any_ingress_egress"), anyIE)...)
 	}
@@ -667,7 +667,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var protoIE []ServiceProtoIEModel
 		resp.Diagnostics.Append(planProtoIE.ElementsAs(ctx, &protoIE, false)...)
 		for i := range protoIE {
-			assignID(&protoIE[i].ID, fmt.Sprintf("proto-ie:%d", protoIE[i].Proto.ValueInt64()))
+			assignID(&protoIE[i].ID, svcKeyProtoIE(protoIE[i].Proto.ValueInt64()))
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("proto_ingress_egress"), protoIE)...)
 	}
@@ -675,7 +675,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var tcpIE []ServiceTCPIEModel
 		resp.Diagnostics.Append(planTCPIE.ElementsAs(ctx, &tcpIE, false)...)
 		for i := range tcpIE {
-			assignID(&tcpIE[i].ID, "tcp-ingress-egress")
+			assignID(&tcpIE[i].ID, svcKeyTCPIE())
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_ingress_egress"), tcpIE)...)
 	}
@@ -683,7 +683,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var tcpE []ServiceTCPEModel
 		resp.Diagnostics.Append(planTCPE.ElementsAs(ctx, &tcpE, false)...)
 		for i := range tcpE {
-			assignID(&tcpE[i].ID, "tcp-egress")
+			assignID(&tcpE[i].ID, svcKeyTCPE())
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_egress"), tcpE)...)
 	}
@@ -691,7 +691,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		var fragIE []ServiceFragIEModel
 		resp.Diagnostics.Append(planFragIE.ElementsAs(ctx, &fragIE, false)...)
 		for i := range fragIE {
-			assignID(&fragIE[i].ID, "frag-ingress-egress")
+			assignID(&fragIE[i].ID, svcKeyFragIE())
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("frag_ingress_egress"), fragIE)...)
 	}
@@ -742,15 +742,15 @@ func (r *ServiceServicesResource) Create(ctx context.Context, req resource.Creat
 	}
 
 	// On first apply IDs were unknown so plan kept config order; reorder state to match.
-	plan.DNS = reorderByPlanOrder(planDNS, plan.DNS, func(e *ServiceDNSModel) string { return fmt.Sprintf("dns:%d", e.Port.ValueInt64()) })
-	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *ServiceHTTPModel) string { return fmt.Sprintf("http:%d", e.Port.ValueInt64()) })
-	plan.ICMP = reorderByPlanOrder(planICMP, plan.ICMP, func(e *ServiceICMPModel) string { return "icmp" })
-	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *ServiceNATModel) string { return fmt.Sprintf("nat:%s:%d", e.Proto.ValueString(), e.Port.ValueInt64()) })
-	plan.AnyIngressEgress = reorderByPlanOrder(planAnyIE, plan.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return "any-ingress-egress" })
-	plan.ProtoIngressEgress = reorderByPlanOrder(planProtoIE, plan.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return fmt.Sprintf("proto-ie:%d", e.Proto.ValueInt64()) })
-	plan.TCPIngressEgress = reorderByPlanOrder(planTCPIE, plan.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return "tcp-ingress-egress" })
-	plan.TCPEgress = reorderByPlanOrder(planTCPE, plan.TCPEgress, func(e *ServiceTCPEModel) string { return "tcp-egress" })
-	plan.FragIngressEgress = reorderByPlanOrder(planFragIE, plan.FragIngressEgress, func(e *ServiceFragIEModel) string { return "frag-ingress-egress" })
+	plan.DNS = reorderByPlanOrder(planDNS, plan.DNS, func(e *ServiceDNSModel) string { return svcKeyDNS(e.Port.ValueInt64()) })
+	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *ServiceHTTPModel) string { return svcKeyHTTP(e.Port.ValueInt64()) })
+	plan.ICMP = reorderByPlanOrder(planICMP, plan.ICMP, func(e *ServiceICMPModel) string { return svcKeyICMP() })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *ServiceNATModel) string { return svcKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.AnyIngressEgress = reorderByPlanOrder(planAnyIE, plan.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return svcKeyAnyIE() })
+	plan.ProtoIngressEgress = reorderByPlanOrder(planProtoIE, plan.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return svcKeyProtoIE(e.Proto.ValueInt64()) })
+	plan.TCPIngressEgress = reorderByPlanOrder(planTCPIE, plan.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return svcKeyTCPIE() })
+	plan.TCPEgress = reorderByPlanOrder(planTCPE, plan.TCPEgress, func(e *ServiceTCPEModel) string { return svcKeyTCPE() })
+	plan.FragIngressEgress = reorderByPlanOrder(planFragIE, plan.FragIngressEgress, func(e *ServiceFragIEModel) string { return svcKeyFragIE() })
 
 	// Restore empty-list vs null: API returning nothing must not turn [] into null.
 	preserveSvcEmptySlices(&plan, set)
@@ -779,15 +779,15 @@ func (r *ServiceServicesResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	state.DNS = reorderByPlanOrder(prevDNS, state.DNS, func(e *ServiceDNSModel) string { return fmt.Sprintf("dns:%d", e.Port.ValueInt64()) })
-	state.HTTP = reorderByPlanOrder(prevHTTP, state.HTTP, func(e *ServiceHTTPModel) string { return fmt.Sprintf("http:%d", e.Port.ValueInt64()) })
-	state.ICMP = reorderByPlanOrder(prevICMP, state.ICMP, func(e *ServiceICMPModel) string { return "icmp" })
-	state.NAT = reorderByPlanOrder(prevNAT, state.NAT, func(e *ServiceNATModel) string { return fmt.Sprintf("nat:%s:%d", e.Proto.ValueString(), e.Port.ValueInt64()) })
-	state.AnyIngressEgress = reorderByPlanOrder(prevAnyIE, state.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return "any-ingress-egress" })
-	state.ProtoIngressEgress = reorderByPlanOrder(prevProtoIE, state.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return fmt.Sprintf("proto-ie:%d", e.Proto.ValueInt64()) })
-	state.TCPIngressEgress = reorderByPlanOrder(prevTCPIE, state.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return "tcp-ingress-egress" })
-	state.TCPEgress = reorderByPlanOrder(prevTCPE, state.TCPEgress, func(e *ServiceTCPEModel) string { return "tcp-egress" })
-	state.FragIngressEgress = reorderByPlanOrder(prevFragIE, state.FragIngressEgress, func(e *ServiceFragIEModel) string { return "frag-ingress-egress" })
+	state.DNS = reorderByPlanOrder(prevDNS, state.DNS, func(e *ServiceDNSModel) string { return svcKeyDNS(e.Port.ValueInt64()) })
+	state.HTTP = reorderByPlanOrder(prevHTTP, state.HTTP, func(e *ServiceHTTPModel) string { return svcKeyHTTP(e.Port.ValueInt64()) })
+	state.ICMP = reorderByPlanOrder(prevICMP, state.ICMP, func(e *ServiceICMPModel) string { return svcKeyICMP() })
+	state.NAT = reorderByPlanOrder(prevNAT, state.NAT, func(e *ServiceNATModel) string { return svcKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	state.AnyIngressEgress = reorderByPlanOrder(prevAnyIE, state.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return svcKeyAnyIE() })
+	state.ProtoIngressEgress = reorderByPlanOrder(prevProtoIE, state.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return svcKeyProtoIE(e.Proto.ValueInt64()) })
+	state.TCPIngressEgress = reorderByPlanOrder(prevTCPIE, state.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return svcKeyTCPIE() })
+	state.TCPEgress = reorderByPlanOrder(prevTCPE, state.TCPEgress, func(e *ServiceTCPEModel) string { return svcKeyTCPE() })
+	state.FragIngressEgress = reorderByPlanOrder(prevFragIE, state.FragIngressEgress, func(e *ServiceFragIEModel) string { return svcKeyFragIE() })
 
 	preserveSvcEmptySlices(&state, set)
 
@@ -826,15 +826,15 @@ func (r *ServiceServicesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	plan.DNS = reorderByPlanOrder(planDNS, plan.DNS, func(e *ServiceDNSModel) string { return fmt.Sprintf("dns:%d", e.Port.ValueInt64()) })
-	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *ServiceHTTPModel) string { return fmt.Sprintf("http:%d", e.Port.ValueInt64()) })
-	plan.ICMP = reorderByPlanOrder(planICMP, plan.ICMP, func(e *ServiceICMPModel) string { return "icmp" })
-	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *ServiceNATModel) string { return fmt.Sprintf("nat:%s:%d", e.Proto.ValueString(), e.Port.ValueInt64()) })
-	plan.AnyIngressEgress = reorderByPlanOrder(planAnyIE, plan.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return "any-ingress-egress" })
-	plan.ProtoIngressEgress = reorderByPlanOrder(planProtoIE, plan.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return fmt.Sprintf("proto-ie:%d", e.Proto.ValueInt64()) })
-	plan.TCPIngressEgress = reorderByPlanOrder(planTCPIE, plan.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return "tcp-ingress-egress" })
-	plan.TCPEgress = reorderByPlanOrder(planTCPE, plan.TCPEgress, func(e *ServiceTCPEModel) string { return "tcp-egress" })
-	plan.FragIngressEgress = reorderByPlanOrder(planFragIE, plan.FragIngressEgress, func(e *ServiceFragIEModel) string { return "frag-ingress-egress" })
+	plan.DNS = reorderByPlanOrder(planDNS, plan.DNS, func(e *ServiceDNSModel) string { return svcKeyDNS(e.Port.ValueInt64()) })
+	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *ServiceHTTPModel) string { return svcKeyHTTP(e.Port.ValueInt64()) })
+	plan.ICMP = reorderByPlanOrder(planICMP, plan.ICMP, func(e *ServiceICMPModel) string { return svcKeyICMP() })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *ServiceNATModel) string { return svcKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.AnyIngressEgress = reorderByPlanOrder(planAnyIE, plan.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return svcKeyAnyIE() })
+	plan.ProtoIngressEgress = reorderByPlanOrder(planProtoIE, plan.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return svcKeyProtoIE(e.Proto.ValueInt64()) })
+	plan.TCPIngressEgress = reorderByPlanOrder(planTCPIE, plan.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return svcKeyTCPIE() })
+	plan.TCPEgress = reorderByPlanOrder(planTCPE, plan.TCPEgress, func(e *ServiceTCPEModel) string { return svcKeyTCPE() })
+	plan.FragIngressEgress = reorderByPlanOrder(planFragIE, plan.FragIngressEgress, func(e *ServiceFragIEModel) string { return svcKeyFragIE() })
 
 	preserveSvcEmptySlices(&plan, set)
 
@@ -1078,6 +1078,16 @@ func apiToSvcServicesModel(entries []apiServiceEntry, m *ServiceServicesResource
 	sortByID(m.TCPEgress, func(e *ServiceTCPEModel) int64 { return e.ID.ValueInt64() })
 	sortByID(m.FragIngressEgress, func(e *ServiceFragIEModel) int64 { return e.ID.ValueInt64() })
 }
+
+func svcKeyDNS(port int64) string              { return fmt.Sprintf("dns:%d", port) }
+func svcKeyHTTP(port int64) string             { return fmt.Sprintf("http:%d", port) }
+func svcKeyICMP() string                       { return "icmp" }
+func svcKeyNAT(proto string, port int64) string { return fmt.Sprintf("nat:%s:%d", proto, port) }
+func svcKeyAnyIE() string                      { return "any-ingress-egress" }
+func svcKeyProtoIE(proto int64) string         { return fmt.Sprintf("proto-ie:%d", proto) }
+func svcKeyTCPIE() string                      { return "tcp-ingress-egress" }
+func svcKeyTCPE() string                       { return "tcp-egress" }
+func svcKeyFragIE() string                     { return "frag-ingress-egress" }
 
 func sortByID[T any](s []T, id func(*T) int64) {
 	sort.SliceStable(s, func(i, j int) bool {

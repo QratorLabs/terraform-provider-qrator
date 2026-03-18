@@ -687,7 +687,7 @@ func (r *DomainServicesResource) Create(ctx context.Context, req resource.Create
 
 	// Remember plan order and which fields were explicitly set (empty list) vs null.
 	planHTTP, planNAT, planNATAll, planTCPProxy, planWS := plan.HTTP, plan.NAT, plan.NATAll, plan.TCPProxy, plan.WebSocket
-	httpSet, natSet, natAllSet, tcpSet, wsSet := planHTTP != nil, planNAT != nil, planNATAll != nil, planTCPProxy != nil, planWS != nil
+	set := domainListsSet(&plan)
 
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
@@ -711,7 +711,7 @@ func (r *DomainServicesResource) Create(ctx context.Context, req resource.Create
 	plan.WebSocket = reorderByPlanOrder(planWS, plan.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
 
 	// Restore empty-list vs null: API returning nothing must not turn [] into null.
-	preserveEmptySlices(&plan, httpSet, natSet, natAllSet, tcpSet, wsSet)
+	preserveEmptySlices(&plan, set)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -728,7 +728,7 @@ func (r *DomainServicesResource) Read(ctx context.Context, req resource.ReadRequ
 	}
 
 	prevHTTP, prevNAT, prevNATAll, prevTCPProxy, prevWS := state.HTTP, state.NAT, state.NATAll, state.TCPProxy, state.WebSocket
-	httpSet, natSet, natAllSet, tcpSet, wsSet := prevHTTP != nil, prevNAT != nil, prevNATAll != nil, prevTCPProxy != nil, prevWS != nil
+	set := domainListsSet(&state)
 
 	if err := r.readAndPopulate(ctx, state.DomainID.ValueInt64(), &state); err != nil {
 		resp.Diagnostics.AddError("Failed to read services", err.Error())
@@ -741,7 +741,7 @@ func (r *DomainServicesResource) Read(ctx context.Context, req resource.ReadRequ
 	state.TCPProxy = reorderByPlanOrder(prevTCPProxy, state.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
 	state.WebSocket = reorderByPlanOrder(prevWS, state.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
 
-	preserveEmptySlices(&state, httpSet, natSet, natAllSet, tcpSet, wsSet)
+	preserveEmptySlices(&state, set)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -759,7 +759,7 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 	}
 
 	planHTTP, planNAT, planNATAll, planTCPProxy, planWS := plan.HTTP, plan.NAT, plan.NATAll, plan.TCPProxy, plan.WebSocket
-	httpSet, natSet, natAllSet, tcpSet, wsSet := planHTTP != nil, planNAT != nil, planNATAll != nil, planTCPProxy != nil, planWS != nil
+	set := domainListsSet(&plan)
 
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
@@ -782,7 +782,7 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 	plan.TCPProxy = reorderByPlanOrder(planTCPProxy, plan.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
 	plan.WebSocket = reorderByPlanOrder(planWS, plan.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
 
-	preserveEmptySlices(&plan, httpSet, natSet, natAllSet, tcpSet, wsSet)
+	preserveEmptySlices(&plan, set)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -1329,20 +1329,34 @@ func reorderByPlanOrder[T any](planList, apiList []T, key func(*T) string) []T {
 // were explicitly set in the config but returned no entries from the API.
 // Without this, a plan with tcpproxy=[] would become tcpproxy=null in state,
 // causing a "Provider produced inconsistent result after apply" error.
-func preserveEmptySlices(m *DomainServicesResourceModel, httpSet, natSet, natAllSet, tcpSet, wsSet bool) {
-	if httpSet && m.HTTP == nil {
+type domainListsSetFlags struct {
+	http, nat, natAll, tcp, ws bool
+}
+
+func domainListsSet(m *DomainServicesResourceModel) domainListsSetFlags {
+	return domainListsSetFlags{
+		http:   m.HTTP != nil,
+		nat:    m.NAT != nil,
+		natAll: m.NATAll != nil,
+		tcp:    m.TCPProxy != nil,
+		ws:     m.WebSocket != nil,
+	}
+}
+
+func preserveEmptySlices(m *DomainServicesResourceModel, s domainListsSetFlags) {
+	if s.http && m.HTTP == nil {
 		m.HTTP = []DomainServiceHTTPModel{}
 	}
-	if natSet && m.NAT == nil {
+	if s.nat && m.NAT == nil {
 		m.NAT = []DomainServiceNATModel{}
 	}
-	if natAllSet && m.NATAll == nil {
+	if s.natAll && m.NATAll == nil {
 		m.NATAll = []DomainServiceNATAllModel{}
 	}
-	if tcpSet && m.TCPProxy == nil {
+	if s.tcp && m.TCPProxy == nil {
 		m.TCPProxy = []DomainServiceTCPProxyModel{}
 	}
-	if wsSet && m.WebSocket == nil {
+	if s.ws && m.WebSocket == nil {
 		m.WebSocket = []DomainServiceWSModel{}
 	}
 }

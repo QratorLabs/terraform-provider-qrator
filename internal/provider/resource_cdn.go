@@ -237,7 +237,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// cache_control
-	if !plan.CacheControl.IsNull() && !plan.CacheControl.IsUnknown() &&
+	if !IsNullOrUnknown(plan.CacheControl) &&
 		(state.CacheControl.IsNull() || plan.CacheControl.ValueString() != state.CacheControl.ValueString()) {
 		param := cacheControlToAPI(plan.CacheControl.ValueString())
 		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_control_set", param); err != nil {
@@ -264,7 +264,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// client_no_cache
-	if !plan.ClientNoCache.IsNull() && !plan.ClientNoCache.IsUnknown() &&
+	if !IsNullOrUnknown(plan.ClientNoCache) &&
 		(state.ClientNoCache.IsNull() || plan.ClientNoCache.ValueBool() != state.ClientNoCache.ValueBool()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "client_no_cache_set", plan.ClientNoCache.ValueBool()); err != nil {
 			resp.Diagnostics.AddError("Failed to update client_no_cache", err.Error())
@@ -273,7 +273,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// cache_ignore_params
-	if !plan.CacheIgnoreParams.IsNull() && !plan.CacheIgnoreParams.IsUnknown() &&
+	if !IsNullOrUnknown(plan.CacheIgnoreParams) &&
 		(state.CacheIgnoreParams.IsNull() || plan.CacheIgnoreParams.ValueBool() != state.CacheIgnoreParams.ValueBool()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_ignore_params_set", plan.CacheIgnoreParams.ValueBool()); err != nil {
 			resp.Diagnostics.AddError("Failed to update cache_ignore_params", err.Error())
@@ -293,7 +293,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// client_ip_header
-	if !plan.ClientIPHeader.IsNull() && !plan.ClientIPHeader.IsUnknown() &&
+	if !IsNullOrUnknown(plan.ClientIPHeader) &&
 		(state.ClientIPHeader.IsNull() || plan.ClientIPHeader.ValueString() != state.ClientIPHeader.ValueString()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "client_ip_header_set", plan.ClientIPHeader.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Failed to update client_ip_header", err.Error())
@@ -313,7 +313,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// http2
-	if !plan.HTTP2.IsNull() && !plan.HTTP2.IsUnknown() &&
+	if !IsNullOrUnknown(plan.HTTP2) &&
 		(state.HTTP2.IsNull() || plan.HTTP2.ValueBool() != state.HTTP2.ValueBool()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "http2_set", plan.HTTP2.ValueBool()); err != nil {
 			resp.Diagnostics.AddError("Failed to update http2", err.Error())
@@ -322,14 +322,14 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// cache_errors
-	if !plan.CacheErrors.IsNull() && !plan.CacheErrors.IsUnknown() {
+	if !IsNullOrUnknown(plan.CacheErrors) {
 		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_set", plan.CacheErrors, state.CacheErrors, &resp.Diagnostics); err != nil {
 			return
 		}
 	}
 
 	// cache_errors_permanent
-	if !plan.CacheErrorsPermanent.IsNull() && !plan.CacheErrorsPermanent.IsUnknown() {
+	if !IsNullOrUnknown(plan.CacheErrorsPermanent) {
 		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_permanent_set", plan.CacheErrorsPermanent, state.CacheErrorsPermanent, &resp.Diagnostics); err != nil {
 			return
 		}
@@ -347,7 +347,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// blocked_uri
-	if !plan.BlockedURI.IsNull() && !plan.BlockedURI.IsUnknown() {
+	if !IsNullOrUnknown(plan.BlockedURI) {
 		if err := r.updateBlockedURI(ctx, apiPath, plan.BlockedURI, state.BlockedURI, &resp.Diagnostics); err != nil {
 			return
 		}
@@ -365,7 +365,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// webp
-	if !plan.WebP.IsNull() && !plan.WebP.IsUnknown() &&
+	if !IsNullOrUnknown(plan.WebP) &&
 		(state.WebP.IsNull() || plan.WebP.ValueInt64() != state.WebP.ValueInt64()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "webp_set", plan.WebP.ValueInt64()); err != nil {
 			resp.Diagnostics.AddError("Failed to update webp", err.Error())
@@ -603,6 +603,11 @@ var cacheErrorAttrTypes = map[string]attr.Type{
 	"timeout": types.Int64Type,
 }
 
+var blockedURIAttrTypes = map[string]attr.Type{
+	"uri":  types.StringType,
+	"code": types.Int64Type,
+}
+
 // updateCacheErrors calls the specified API method if the cache errors configuration has changed.
 func (r *CDNResource) updateCacheErrors(ctx context.Context, apiPath, method string, plan, state types.List, diags *diag.Diagnostics) error {
 	var planEntries, stateEntries []CDNCacheErrorEntryModel
@@ -613,7 +618,7 @@ func (r *CDNResource) updateCacheErrors(ctx context.Context, apiPath, method str
 		return fmt.Errorf("failed to parse plan %s", method)
 	}
 
-	if !state.IsNull() && !state.IsUnknown() {
+	if !IsNullOrUnknown(state) {
 		d = state.ElementsAs(ctx, &stateEntries, false)
 		diags.Append(d...)
 		if diags.HasError() {
@@ -698,7 +703,7 @@ func (r *CDNResource) updateBlockedURI(ctx context.Context, apiPath string, plan
 		return fmt.Errorf("failed to parse plan blocked_uri")
 	}
 
-	if !state.IsNull() && !state.IsUnknown() {
+	if !IsNullOrUnknown(state) {
 		d = state.ElementsAs(ctx, &stateEntries, false)
 		diags.Append(d...)
 		if diags.HasError() {
@@ -744,11 +749,6 @@ func blockedURIEntriesEqual(a, b []CDNBlockedURIEntryModel) bool {
 
 // blockedURIEntriesToList converts API blocked URI entries to a Terraform List value.
 func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, diags *diag.Diagnostics) types.List {
-	attrTypes := map[string]attr.Type{
-		"uri":  types.StringType,
-		"code": types.Int64Type,
-	}
-
 	models := make([]CDNBlockedURIEntryModel, len(entries))
 	for i, e := range entries {
 		models[i] = CDNBlockedURIEntryModel{
@@ -759,15 +759,15 @@ func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, 
 
 	elems := make([]attr.Value, len(models))
 	for i, m := range models {
-		obj, d := types.ObjectValueFrom(ctx, attrTypes, m)
+		obj, d := types.ObjectValueFrom(ctx, blockedURIAttrTypes, m)
 		diags.Append(d...)
 		if diags.HasError() {
-			return types.ListNull(types.ObjectType{AttrTypes: attrTypes})
+			return types.ListNull(types.ObjectType{AttrTypes: blockedURIAttrTypes})
 		}
 		elems[i] = obj
 	}
 
-	list, d := types.ListValue(types.ObjectType{AttrTypes: attrTypes}, elems)
+	list, d := types.ListValue(types.ObjectType{AttrTypes: blockedURIAttrTypes}, elems)
 	diags.Append(d...)
 	return list
 }
