@@ -629,6 +629,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range dns {
 			assignID(&dns[i].ID, fmt.Sprintf("dns:%d", dns[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(dns, func(e *ServiceDNSModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("dns"), dns)...)
 	}
 	if !planHTTP.IsUnknown() && !planHTTP.IsNull() {
@@ -637,6 +638,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range http {
 			assignID(&http[i].ID, fmt.Sprintf("http:%d", http[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(http, func(e *ServiceHTTPModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
 	}
 	if !planICMP.IsUnknown() && !planICMP.IsNull() {
@@ -645,6 +647,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range icmp {
 			assignID(&icmp[i].ID, "icmp")
 		}
+		sortByIDUnknownLast(icmp, func(e *ServiceICMPModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("icmp"), icmp)...)
 	}
 	if !planNAT.IsUnknown() && !planNAT.IsNull() {
@@ -653,6 +656,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range nat {
 			assignID(&nat[i].ID, fmt.Sprintf("nat:%s:%d", nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(nat, func(e *ServiceNATModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
 	}
 	if !planAnyIE.IsUnknown() && !planAnyIE.IsNull() {
@@ -661,6 +665,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range anyIE {
 			assignID(&anyIE[i].ID, "any-ingress-egress")
 		}
+		sortByIDUnknownLast(anyIE, func(e *ServiceAnyIEModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("any_ingress_egress"), anyIE)...)
 	}
 	if !planProtoIE.IsUnknown() && !planProtoIE.IsNull() {
@@ -669,6 +674,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range protoIE {
 			assignID(&protoIE[i].ID, fmt.Sprintf("proto-ie:%d", protoIE[i].Proto.ValueInt64()))
 		}
+		sortByIDUnknownLast(protoIE, func(e *ServiceProtoIEModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("proto_ingress_egress"), protoIE)...)
 	}
 	if !planTCPIE.IsUnknown() && !planTCPIE.IsNull() {
@@ -677,6 +683,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range tcpIE {
 			assignID(&tcpIE[i].ID, "tcp-ingress-egress")
 		}
+		sortByIDUnknownLast(tcpIE, func(e *ServiceTCPIEModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_ingress_egress"), tcpIE)...)
 	}
 	if !planTCPE.IsUnknown() && !planTCPE.IsNull() {
@@ -685,6 +692,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range tcpE {
 			assignID(&tcpE[i].ID, "tcp-egress")
 		}
+		sortByIDUnknownLast(tcpE, func(e *ServiceTCPEModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_egress"), tcpE)...)
 	}
 	if !planFragIE.IsUnknown() && !planFragIE.IsNull() {
@@ -693,6 +701,7 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		for i := range fragIE {
 			assignID(&fragIE[i].ID, "frag-ingress-egress")
 		}
+		sortByIDUnknownLast(fragIE, func(e *ServiceFragIEModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("frag_ingress_egress"), fragIE)...)
 	}
 }
@@ -721,6 +730,12 @@ func (r *ServiceServicesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	// Remember plan order and which fields were explicitly set (empty list) vs null.
+	planDNS, planHTTP, planICMP := plan.DNS, plan.HTTP, plan.ICMP
+	planNAT, planAnyIE, planProtoIE := plan.NAT, plan.AnyIngressEgress, plan.ProtoIngressEgress
+	planTCPIE, planTCPE, planFragIE := plan.TCPIngressEgress, plan.TCPEgress, plan.FragIngressEgress
+	set := svcListsSet(&plan)
+
 	serviceID := plan.ServiceID.ValueInt64()
 	apiPath := entityService.apiPath(serviceID)
 
@@ -734,6 +749,20 @@ func (r *ServiceServicesResource) Create(ctx context.Context, req resource.Creat
 		resp.Diagnostics.AddError("Failed to read services after create", err.Error())
 		return
 	}
+
+	// On first apply IDs were unknown so plan kept config order; reorder state to match.
+	plan.DNS = reorderByPlanOrder(planDNS, plan.DNS, func(e *ServiceDNSModel) string { return fmt.Sprintf("dns:%d", e.Port.ValueInt64()) })
+	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *ServiceHTTPModel) string { return fmt.Sprintf("http:%d", e.Port.ValueInt64()) })
+	plan.ICMP = reorderByPlanOrder(planICMP, plan.ICMP, func(e *ServiceICMPModel) string { return "icmp" })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *ServiceNATModel) string { return fmt.Sprintf("nat:%s:%d", e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.AnyIngressEgress = reorderByPlanOrder(planAnyIE, plan.AnyIngressEgress, func(e *ServiceAnyIEModel) string { return "any-ingress-egress" })
+	plan.ProtoIngressEgress = reorderByPlanOrder(planProtoIE, plan.ProtoIngressEgress, func(e *ServiceProtoIEModel) string { return fmt.Sprintf("proto-ie:%d", e.Proto.ValueInt64()) })
+	plan.TCPIngressEgress = reorderByPlanOrder(planTCPIE, plan.TCPIngressEgress, func(e *ServiceTCPIEModel) string { return "tcp-ingress-egress" })
+	plan.TCPEgress = reorderByPlanOrder(planTCPE, plan.TCPEgress, func(e *ServiceTCPEModel) string { return "tcp-egress" })
+	plan.FragIngressEgress = reorderByPlanOrder(planFragIE, plan.FragIngressEgress, func(e *ServiceFragIEModel) string { return "frag-ingress-egress" })
+
+	// Restore empty-list vs null: API returning nothing must not turn [] into null.
+	preserveSvcEmptySlices(&plan, set)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -749,10 +778,14 @@ func (r *ServiceServicesResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
+	set := svcListsSet(&state)
+
 	if err := r.readAndPopulate(ctx, state.ServiceID.ValueInt64(), &state); err != nil {
 		resp.Diagnostics.AddError("Failed to read services", err.Error())
 		return
 	}
+
+	preserveSvcEmptySlices(&state, set)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -769,6 +802,8 @@ func (r *ServiceServicesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
+	set := svcListsSet(&plan)
+
 	serviceID := plan.ServiceID.ValueInt64()
 	apiPath := entityService.apiPath(serviceID)
 
@@ -783,6 +818,8 @@ func (r *ServiceServicesResource) Update(ctx context.Context, req resource.Updat
 		resp.Diagnostics.AddError("Failed to read services after update", err.Error())
 		return
 	}
+
+	preserveSvcEmptySlices(&plan, set)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -1031,6 +1068,21 @@ func sortByID[T any](s []T, id func(*T) int64) {
 	})
 }
 
+// sortByIDUnknownLast sorts by numeric ID; entries with unknown/null ID go last.
+// Used in ModifyPlan to match the order state will have after apply.
+func sortByIDUnknownLast[T any](s []T, id func(*T) types.Int64) {
+	sort.SliceStable(s, func(i, j int) bool {
+		ii, ij := id(&s[i]), id(&s[j])
+		if ii.IsUnknown() || ii.IsNull() {
+			return false
+		}
+		if ij.IsUnknown() || ij.IsNull() {
+			return true
+		}
+		return ii.ValueInt64() < ij.ValueInt64()
+	})
+}
+
 func apiToSvcDNSModel(e *apiServiceEntry) ServiceDNSModel {
 	return ServiceDNSModel{
 		ID:          optionalInt64(e.ID),
@@ -1245,4 +1297,55 @@ func svcFragIEModelToAPI(m *ServiceFragIEModel) apiServiceEntry {
 		e.RateLimit = &rl
 	}
 	return e
+}
+
+// svcListsSet captures which list fields are non-nil (explicitly set vs null).
+type svcListsSetFlags struct {
+	dns, http, icmp, nat, anyIE, protoIE, tcpIE, tcpE, fragIE bool
+}
+
+func svcListsSet(m *ServiceServicesResourceModel) svcListsSetFlags {
+	return svcListsSetFlags{
+		dns:     m.DNS != nil,
+		http:    m.HTTP != nil,
+		icmp:    m.ICMP != nil,
+		nat:     m.NAT != nil,
+		anyIE:   m.AnyIngressEgress != nil,
+		protoIE: m.ProtoIngressEgress != nil,
+		tcpIE:   m.TCPIngressEgress != nil,
+		tcpE:    m.TCPEgress != nil,
+		fragIE:  m.FragIngressEgress != nil,
+	}
+}
+
+// preserveSvcEmptySlices restores empty-list (vs nil/null) for service list
+// fields that were explicitly set in config but returned no entries from API.
+func preserveSvcEmptySlices(m *ServiceServicesResourceModel, s svcListsSetFlags) {
+	if s.dns && m.DNS == nil {
+		m.DNS = []ServiceDNSModel{}
+	}
+	if s.http && m.HTTP == nil {
+		m.HTTP = []ServiceHTTPModel{}
+	}
+	if s.icmp && m.ICMP == nil {
+		m.ICMP = []ServiceICMPModel{}
+	}
+	if s.nat && m.NAT == nil {
+		m.NAT = []ServiceNATModel{}
+	}
+	if s.anyIE && m.AnyIngressEgress == nil {
+		m.AnyIngressEgress = []ServiceAnyIEModel{}
+	}
+	if s.protoIE && m.ProtoIngressEgress == nil {
+		m.ProtoIngressEgress = []ServiceProtoIEModel{}
+	}
+	if s.tcpIE && m.TCPIngressEgress == nil {
+		m.TCPIngressEgress = []ServiceTCPIEModel{}
+	}
+	if s.tcpE && m.TCPEgress == nil {
+		m.TCPEgress = []ServiceTCPEModel{}
+	}
+	if s.fragIE && m.FragIngressEgress == nil {
+		m.FragIngressEgress = []ServiceFragIEModel{}
+	}
 }

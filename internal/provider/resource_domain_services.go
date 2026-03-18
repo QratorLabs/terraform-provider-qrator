@@ -625,6 +625,7 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range http {
 			assignID(&http[i].ID, compositeKeyHTTP(http[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(http, func(e *DomainServiceHTTPModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
 	}
 	if !planNAT.IsUnknown() && !planNAT.IsNull() {
@@ -633,6 +634,7 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range nat {
 			assignID(&nat[i].ID, compositeKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(nat, func(e *DomainServiceNATModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
 	}
 	if !planNATAll.IsUnknown() && !planNATAll.IsNull() {
@@ -641,6 +643,7 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range natAll {
 			assignID(&natAll[i].ID, compositeKeyNATAll(natAll[i].Proto.ValueString()))
 		}
+		sortByIDUnknownLast(natAll, func(e *DomainServiceNATAllModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat_all"), natAll)...)
 	}
 	if !planTCPProxy.IsUnknown() && !planTCPProxy.IsNull() {
@@ -649,6 +652,7 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range tcp {
 			assignID(&tcp[i].ID, compositeKeyTCPProxy(tcp[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(tcp, func(e *DomainServiceTCPProxyModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcpproxy"), tcp)...)
 	}
 	if !planWS.IsUnknown() && !planWS.IsNull() {
@@ -657,6 +661,7 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for i := range ws {
 			assignID(&ws[i].ID, compositeKeyWebSocket(ws[i].Port.ValueInt64()))
 		}
+		sortByIDUnknownLast(ws, func(e *DomainServiceWSModel) types.Int64 { return e.ID })
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("websocket"), ws)...)
 	}
 }
@@ -685,6 +690,10 @@ func (r *DomainServicesResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
+	// Remember plan order and which fields were explicitly set (empty list) vs null.
+	planHTTP, planNAT, planNATAll, planTCPProxy, planWS := plan.HTTP, plan.NAT, plan.NATAll, plan.TCPProxy, plan.WebSocket
+	httpSet, natSet, natAllSet, tcpSet, wsSet := planHTTP != nil, planNAT != nil, planNATAll != nil, planTCPProxy != nil, planWS != nil
+
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
 
@@ -698,6 +707,16 @@ func (r *DomainServicesResource) Create(ctx context.Context, req resource.Create
 		resp.Diagnostics.AddError("Failed to read services after create", err.Error())
 		return
 	}
+
+	// On first apply IDs were unknown so plan kept config order; reorder state to match.
+	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *DomainServiceHTTPModel) string { return compositeKeyHTTP(e.Port.ValueInt64()) })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *DomainServiceNATModel) string { return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.NATAll = reorderByPlanOrder(planNATAll, plan.NATAll, func(e *DomainServiceNATAllModel) string { return compositeKeyNATAll(e.Proto.ValueString()) })
+	plan.TCPProxy = reorderByPlanOrder(planTCPProxy, plan.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
+	plan.WebSocket = reorderByPlanOrder(planWS, plan.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
+
+	// Restore empty-list vs null: API returning nothing must not turn [] into null.
+	preserveEmptySlices(&plan, httpSet, natSet, natAllSet, tcpSet, wsSet)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -713,10 +732,14 @@ func (r *DomainServicesResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
+	httpSet, natSet, natAllSet, tcpSet, wsSet := state.HTTP != nil, state.NAT != nil, state.NATAll != nil, state.TCPProxy != nil, state.WebSocket != nil
+
 	if err := r.readAndPopulate(ctx, state.DomainID.ValueInt64(), &state); err != nil {
 		resp.Diagnostics.AddError("Failed to read services", err.Error())
 		return
 	}
+
+	preserveEmptySlices(&state, httpSet, natSet, natAllSet, tcpSet, wsSet)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -733,6 +756,8 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
+	httpSet, natSet, natAllSet, tcpSet, wsSet := plan.HTTP != nil, plan.NAT != nil, plan.NATAll != nil, plan.TCPProxy != nil, plan.WebSocket != nil
+
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/domain/%d", domainID)
 
@@ -747,6 +772,8 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 		resp.Diagnostics.AddError("Failed to read services after update", err.Error())
 		return
 	}
+
+	preserveEmptySlices(&plan, httpSet, natSet, natAllSet, tcpSet, wsSet)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -1259,4 +1286,54 @@ func boolPtr(v types.Bool) *bool {
 	}
 	b := v.ValueBool()
 	return &b
+}
+
+// reorderByPlanOrder reorders apiList to match the composite-key order of planList.
+// Entries present in apiList but absent from planList are appended at the end.
+// Used after Create so state order matches plan order on first apply.
+func reorderByPlanOrder[T any](planList, apiList []T, key func(*T) string) []T {
+	if len(apiList) == 0 {
+		return apiList
+	}
+	byKey := make(map[string]T, len(apiList))
+	for i := range apiList {
+		byKey[key(&apiList[i])] = apiList[i]
+	}
+	result := make([]T, 0, len(apiList))
+	seen := make(map[string]bool, len(apiList))
+	for i := range planList {
+		k := key(&planList[i])
+		if e, ok := byKey[k]; ok {
+			result = append(result, e)
+			seen[k] = true
+		}
+	}
+	for i := range apiList {
+		if k := key(&apiList[i]); !seen[k] {
+			result = append(result, apiList[i])
+		}
+	}
+	return result
+}
+
+// preserveEmptySlices restores empty-slice (vs nil/null) for list fields that
+// were explicitly set in the config but returned no entries from the API.
+// Without this, a plan with tcpproxy=[] would become tcpproxy=null in state,
+// causing a "Provider produced inconsistent result after apply" error.
+func preserveEmptySlices(m *DomainServicesResourceModel, httpSet, natSet, natAllSet, tcpSet, wsSet bool) {
+	if httpSet && m.HTTP == nil {
+		m.HTTP = []DomainServiceHTTPModel{}
+	}
+	if natSet && m.NAT == nil {
+		m.NAT = []DomainServiceNATModel{}
+	}
+	if natAllSet && m.NATAll == nil {
+		m.NATAll = []DomainServiceNATAllModel{}
+	}
+	if tcpSet && m.TCPProxy == nil {
+		m.TCPProxy = []DomainServiceTCPProxyModel{}
+	}
+	if wsSet && m.WebSocket == nil {
+		m.WebSocket = []DomainServiceWSModel{}
+	}
 }
