@@ -935,7 +935,7 @@ func svcCompositeKey(entry *apiServiceEntry) string {
 // ---------------------------------------------------------------------------
 
 func buildSvcServiceList(m *ServiceServicesResourceModel) []apiServiceEntry {
-	var entries []apiServiceEntry
+	entries := []apiServiceEntry{}
 
 	for i := range m.DNS {
 		entries = append(entries, svcDNSModelToAPI(&m.DNS[i]))

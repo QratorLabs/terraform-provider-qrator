@@ -896,7 +896,7 @@ func compositeKeyFromAPI(entry *apiServiceEntry) string {
 // ---------------------------------------------------------------------------
 
 func buildServiceList(m *DomainServicesResourceModel) []apiServiceEntry {
-	var entries []apiServiceEntry
+	entries := []apiServiceEntry{}
 
 	for i := range m.HTTP {
 		entries = append(entries, httpModelToAPI(&m.HTTP[i]))
