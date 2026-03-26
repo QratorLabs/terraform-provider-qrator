@@ -27,7 +27,6 @@ resource "qrator_domain_services" "web" {
       upstream_balancer = "roundrobin"
       upstream_weights  = false
       upstream_backups  = false
-      upstream_ssl      = false
       upstreams = [
         { ip = "10.0.0.1", port = 8080, weight = 100, type = "primary" }
       ]
@@ -74,7 +73,6 @@ resource "qrator_domain_services" "full" {
       upstream_balancer = "roundrobin"
       upstream_weights  = false
       upstream_backups  = false
-      upstream_ssl      = false
       upstreams = [
         { ip = "10.0.0.1", port = 8080, weight = 100, type = "primary" }
       ]
@@ -167,14 +165,14 @@ Required:
 - `upstream_backups` (Boolean) Enable backup server support.
 - `upstreams` (List of Object) Upstream servers (see below).
 
-Optional:
+Optional/Computed:
 
-- `ssl` (Boolean) Enable SSL/TLS on the frontend. Defaults to `false`.
-- `http2` (Boolean) Enable HTTP/2. Requires `ssl = true`. Defaults to `false`.
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `upstream_ssl` (Boolean) Enable SSL/TLS for upstream connections. Defaults to `false`.
+- `ssl` (Boolean) Enable SSL/TLS on the frontend. API default: `false`.
+- `http2` (Boolean) Enable HTTP/2. Requires `ssl = true`. API default: `false`.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `upstream_ssl` (Boolean) Enable SSL/TLS for upstream connections. API default: `false`.
 - `upstream_sni_name` (String) SNI hostname for upstream TLS connections.
-- `upstream_sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests.
+- `upstream_sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests. API default: `false`.
 
 Read-Only:
 
@@ -189,11 +187,11 @@ Required:
 - `upstream_ip` (String) Upstream server IPv4 address.
 - `upstream_port` (Number) Upstream server port (1–65535).
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `drop_amp` (Boolean) Drop amplified packets. Only for UDP.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000–1000000000000, multiple of 8000. Only for UDP.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `drop_amp` (Boolean) Drop amplified packets. Only for UDP. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000–1000000000000, multiple of 8000. Only for UDP. API default: `8000000`.
 
 Read-Only:
 
@@ -206,11 +204,11 @@ Required:
 - `proto` (String) Protocol: `tcp` or `udp`.
 - `upstream_ip` (String) Upstream server IPv4 address.
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `drop_amp` (Boolean) Drop amplified packets. Only for UDP.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000–1000000000000, multiple of 8000. Only for UDP.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `drop_amp` (Boolean) Drop amplified packets. Only for UDP. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000–1000000000000, multiple of 8000. UDP default: `8000000`; TCP default: `null`.
 
 Read-Only:
 
@@ -223,10 +221,10 @@ Required:
 - `port` (Number) Listening port (1–65535).
 - `upstreams` (List of Object) Upstream servers (see below).
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `proxy_protocol` (Number) Proxy protocol version: `0`, `1`, or `2`.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `proxy_protocol` (Number) Proxy protocol version: `0`, `1`, or `2`. API default: `2`.
 
 Read-Only:
 
@@ -239,11 +237,11 @@ Required:
 - `port` (Number) Listening port (1–65535).
 - `upstreams` (List of Object) Upstream servers (see below).
 
-Optional:
+Optional/Computed:
 
-- `ssl` (Boolean) Enable SSL/TLS on the frontend.
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `upstream_ssl` (Boolean) Enable SSL/TLS for upstream connections.
+- `ssl` (Boolean) Enable SSL/TLS on the frontend. API default: `false`.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `upstream_ssl` (Boolean) Enable SSL/TLS for upstream connections. API default: `false`.
 
 Read-Only:
 
@@ -269,5 +267,5 @@ Optional:
 
 - No duplicate services with the same composite key (type + port/proto).
 - `nat_all`: at most 1 TCP and 1 UDP entry.
-- `drop_amp` and `rate_limit` are only valid for UDP services (nat, nat_all).
+- `drop_amp` and `rate_limit` apply only to UDP nat/nat_all services; for TCP they are ignored by the API.
 - `http2 = true` requires `ssl = true`.

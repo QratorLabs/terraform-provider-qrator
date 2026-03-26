@@ -64,10 +64,8 @@ resource "qrator_service_services" "full" {
 
   http = [
     {
-      port = 80
-      upstream = {
-        ssl = false
-      }
+      port     = 80
+      upstream = {}
     },
     {
       port  = 443
@@ -181,21 +179,18 @@ Read-Only:
 
 #### Nested Schema for `http.upstream`
 
-Required:
+Optional/Computed:
 
-- `ssl` (Boolean) Enable SSL/TLS for upstream connections.
-
-Optional:
-
+- `ssl` (Boolean) Enable SSL/TLS for upstream connections. API default: `false`.
 - `sni_name` (String) SNI hostname for upstream TLS connections (max 255 chars).
-- `sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests. Defaults to `false`.
+- `sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests. API default: `false`.
 
 ### Nested Schema for `icmp`
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000. API default: `8000000`.
 
 Read-Only:
 
@@ -208,11 +203,11 @@ Required:
 - `port` (Number) Listening port (1-65535).
 - `proto` (String) Protocol: `tcp` or `udp`.
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `drop_amp` (Boolean) Drop amplified packets. Only for UDP.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000. Only for UDP.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `drop_amp` (Boolean) Drop amplified packets. Only for UDP. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000. UDP default: `8000000`; TCP: not applicable.
 
 Read-Only:
 
@@ -220,11 +215,11 @@ Read-Only:
 
 ### Nested Schema for `any_ingress_egress`
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `drop_amp` (Boolean) Drop amplified packets.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `drop_amp` (Boolean) Drop amplified packets. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000. API default: `8000000`.
 
 Read-Only:
 
@@ -236,11 +231,11 @@ Required:
 
 - `proto` (Number) IP protocol number (1-254).
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `drop_amp` (Boolean) Drop amplified packets.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `drop_amp` (Boolean) Drop amplified packets. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000. API default: `8000000`.
 
 Read-Only:
 
@@ -268,10 +263,10 @@ Read-Only:
 
 ### Nested Schema for `frag_ingress_egress`
 
-Optional:
+Optional/Computed:
 
-- `default_drop` (Boolean) If true, only whitelisted IPs can access the service.
-- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000.
+- `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
+- `rate_limit` (Number) Maximum packet rate (bps), 8000-1000000000000, multiple of 8000. API default: `8000000`.
 
 Read-Only:
 
@@ -281,5 +276,6 @@ Read-Only:
 
 - No duplicate services with the same composite key (type + port/proto).
 - At most one entry each for: `icmp`, `any_ingress_egress`, `tcp_ingress_egress`, `tcp_egress`, `frag_ingress_egress`.
-- `drop_amp` and `rate_limit` are only valid for UDP services (nat).
+- `drop_amp` applies to `any_ingress_egress`, `proto_ingress_egress`, and UDP `nat`.
+- `rate_limit` applies to `icmp`, `any_ingress_egress`, `proto_ingress_egress`, `frag_ingress_egress`, and UDP `nat`.
 - `http2 = true` requires `ssl = true`.

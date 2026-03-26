@@ -252,10 +252,12 @@ func natServiceSchemaAttrs() map[string]schema.Attribute {
 		"drop_amp": schema.BoolAttribute{
 			Description: "If true, amplified packets are dropped. Only for UDP.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"rate_limit": schema.Int64Attribute{
 			Description: "Maximum packet rate (bps). Only for UDP. Must be between 8000 and 1000000000000, multiple of 8000.",
 			Optional:    true,
+			Computed:    true,
 			Validators:  []validator.Int64{int64validator.Between(8000, 1000000000000)},
 		},
 		"upstream_ip": schema.StringAttribute{
@@ -286,10 +288,12 @@ func natAllServiceSchemaAttrs() map[string]schema.Attribute {
 		"drop_amp": schema.BoolAttribute{
 			Description: "If true, amplified packets are dropped. Only for UDP.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"rate_limit": schema.Int64Attribute{
 			Description: "Maximum packet rate (bps). Must be between 8000 and 1000000000000, multiple of 8000.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"upstream_ip": schema.StringAttribute{
 			Description: "Upstream server IPv4 address.",
@@ -330,6 +334,7 @@ func websocketServiceSchemaAttrs() map[string]schema.Attribute {
 		"ssl": schema.BoolAttribute{
 			Description: "Enable SSL/TLS on the frontend.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"default_drop": schema.BoolAttribute{
 			Description: "If true, only whitelisted IPs can access the service.",
@@ -338,7 +343,8 @@ func websocketServiceSchemaAttrs() map[string]schema.Attribute {
 		},
 		"upstream_ssl": schema.BoolAttribute{
 			Description: "Enable SSL/TLS for upstream connections.",
-			Required:    true,
+			Optional:    true,
+			Computed:    true,
 		},
 		"upstreams": schema.ListNestedAttribute{
 			Description: "Upstream servers.",

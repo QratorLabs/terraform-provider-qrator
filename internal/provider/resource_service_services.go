@@ -175,7 +175,8 @@ func svcHTTPSchemaAttrs() map[string]schema.Attribute {
 			Attributes: map[string]schema.Attribute{
 				"ssl": schema.BoolAttribute{
 					Description: "Enable SSL/TLS for upstream connections.",
-					Required:    true,
+					Optional:    true,
+					Computed:    true,
 				},
 				"sni_name": schema.StringAttribute{
 					Description: "SNI hostname for upstream TLS connections.",
@@ -222,6 +223,7 @@ func svcNATSchemaAttrs() map[string]schema.Attribute {
 		"drop_amp": schema.BoolAttribute{
 			Description: "If true, amplified packets are dropped. Only for UDP.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"rate_limit": rateLimitAttr(),
 	}
@@ -238,6 +240,7 @@ func svcAnyIESchemaAttrs() map[string]schema.Attribute {
 		"drop_amp": schema.BoolAttribute{
 			Description: "If true, amplified packets are dropped.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"rate_limit": rateLimitAttr(),
 	}
@@ -259,6 +262,7 @@ func svcProtoIESchemaAttrs() map[string]schema.Attribute {
 		"drop_amp": schema.BoolAttribute{
 			Description: "If true, amplified packets are dropped.",
 			Optional:    true,
+			Computed:    true,
 		},
 		"rate_limit": rateLimitAttr(),
 	}
@@ -302,6 +306,7 @@ func rateLimitAttr() schema.Int64Attribute {
 	return schema.Int64Attribute{
 		Description: "Maximum packet rate (bps). Must be between 8000 and 1000000000000, multiple of 8000.",
 		Optional:    true,
+		Computed:    true,
 		Validators:  []validator.Int64{int64validator.Between(8000, 1000000000000)},
 	}
 }
