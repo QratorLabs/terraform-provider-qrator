@@ -81,7 +81,6 @@ resource "qrator_domain_services" "example" {
       upstream_balancer = "roundrobin"
       upstream_weights  = false
       upstream_backups  = false
-      upstream_ssl      = false
       upstreams = [
         { ip = "10.0.0.1", port = 8080, weight = 100, type = "primary" },
       ]
@@ -126,6 +125,26 @@ resource "qrator_domain_whitelist" "example" {
   default_drop = false
 
   entries = []
+}
+```
+
+```shell
+terraform apply
+```
+
+### Step 4 (optional) — Enable CDN
+
+If CDN is enabled for your domain, configure it after the domain is fully set up. The `default_host` attribute is read-only and returns the CDN hostname assigned by Qrator — use it to set up your DNS CNAME.
+
+```terraform
+resource "qrator_cdn" "example" {
+  domain_id     = qrator_domain.example.id
+  cache_control = "cdn"
+}
+
+output "cdn_default_host" {
+  description = "CDN hostname to use as DNS CNAME target."
+  value       = qrator_cdn.example.default_host
 }
 ```
 
