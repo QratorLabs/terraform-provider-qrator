@@ -168,6 +168,10 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 				Validators:  []validator.Int64{int64validator.Between(0, 100)},
 			},
+			"default_host": schema.StringAttribute{
+				Description: "Default configured hostname returned by the API.",
+				Computed:    true,
+			},
 		},
 	}
 	tflog.Debug(ctx, "Defined CDN resource schema")
@@ -403,6 +407,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		compressDisabled         []string
 		blockedURIEntries        []cdnBlockedURIEntry
 		whiteURI                 []string
+		defaultHost              string
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -533,6 +538,14 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return json.Unmarshal(v, &webp)
 	})
 
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "default_host", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &defaultHost)
+	})
+
 	if err := g.Wait(); err != nil {
 		resp.Diagnostics.AddError("Failed to read CDN settings", err.Error())
 		return
@@ -588,6 +601,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
 
 	state.WebP = types.Int64Value(webp)
+	state.DefaultHost = types.StringValue(defaultHost)
 
 	resp.State.Set(ctx, &state)
 }

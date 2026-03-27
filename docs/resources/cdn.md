@@ -54,6 +54,10 @@ resource "qrator_cdn" "example" {
 
   webp = 80
 }
+
+output "cdn_default_host" {
+  value = qrator_cdn.example.default_host
+}
 ```
 
 ## Import
@@ -88,6 +92,10 @@ terraform import qrator_cdn.example 12345
 - `http2` (Boolean) Enable CDN support for HTTP/2 (in addition to HTTP/1.1).
 - `webp` (Number) WebP image compression quality (0-100). `0` disables conversion, `1`-`100` enables on-the-fly conversion of images to WebP format with the specified quality.
 - `white_uri` (List of String) List of allowed URI regex patterns. If set, requests not matching any pattern get a 404 response. Leave empty to disable.
+
+### Read-Only
+
+- `default_host` (String) Default configured hostname returned by the API.
 
 ### Nested Schema for `blocked_uri`
 
