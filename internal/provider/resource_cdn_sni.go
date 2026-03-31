@@ -109,6 +109,12 @@ func (r *CDNSNIResource) Create(ctx context.Context, req resource.CreateRequest,
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
+	var planEntries []CDNSNIEntryModel
+	resp.Diagnostics.Append(plan.Entries.ElementsAs(ctx, &planEntries, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	params, err := r.entriesToAPI(ctx, plan.Entries)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to parse SNI entries", err.Error())
@@ -120,7 +126,7 @@ func (r *CDNSNIResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	r.readAndSetState(ctx, domainID, &resp.Diagnostics, &resp.State)
+	r.readAndSetState(ctx, domainID, planEntries, &resp.Diagnostics, &resp.State)
 }
 
 func (r *CDNSNIResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -130,7 +136,15 @@ func (r *CDNSNIResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	r.readAndSetState(ctx, state.DomainID.ValueInt64(), &resp.Diagnostics, &resp.State)
+	var prevEntries []CDNSNIEntryModel
+	if !state.Entries.IsNull() && !state.Entries.IsUnknown() {
+		resp.Diagnostics.Append(state.Entries.ElementsAs(ctx, &prevEntries, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	r.readAndSetState(ctx, state.DomainID.ValueInt64(), prevEntries, &resp.Diagnostics, &resp.State)
 }
 
 func (r *CDNSNIResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -143,6 +157,12 @@ func (r *CDNSNIResource) Update(ctx context.Context, req resource.UpdateRequest,
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
+	var planEntries []CDNSNIEntryModel
+	resp.Diagnostics.Append(plan.Entries.ElementsAs(ctx, &planEntries, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	params, err := r.entriesToAPI(ctx, plan.Entries)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to parse SNI entries", err.Error())
@@ -154,7 +174,7 @@ func (r *CDNSNIResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	r.readAndSetState(ctx, domainID, &resp.Diagnostics, &resp.State)
+	r.readAndSetState(ctx, domainID, planEntries, &resp.Diagnostics, &resp.State)
 }
 
 func (r *CDNSNIResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -194,7 +214,8 @@ func (r *CDNSNIResource) entriesToAPI(ctx context.Context, entries types.List) (
 }
 
 // readAndSetState reads SNI entries from the API and writes them into state.
-func (r *CDNSNIResource) readAndSetState(ctx context.Context, domainID int64, diags *diag.Diagnostics, state *tfsdk.State) {
+// ref is used to restore user-defined order; pass nil to skip reordering.
+func (r *CDNSNIResource) readAndSetState(ctx context.Context, domainID int64, ref []CDNSNIEntryModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, "sni_get", nil)
@@ -209,22 +230,30 @@ func (r *CDNSNIResource) readAndSetState(ctx context.Context, domainID int64, di
 		return
 	}
 
-	sniAttrTypes := map[string]attr.Type{
+	cdnSNIAttrTypes := map[string]attr.Type{
 		"host":        types.StringType,
 		"certificate": types.Int64Type,
 	}
 
-	elems := make([]attr.Value, len(entries))
+	models := make([]CDNSNIEntryModel, len(entries))
 	for i, e := range entries {
-		m := CDNSNIEntryModel{
-			Host: types.StringValue(e.Host),
-		}
+		models[i].Host = types.StringValue(e.Host)
 		if e.Certificate != nil {
-			m.Certificate = types.Int64Value(*e.Certificate)
+			models[i].Certificate = types.Int64Value(*e.Certificate)
 		} else {
-			m.Certificate = types.Int64Null()
+			models[i].Certificate = types.Int64Null()
 		}
-		obj, d := types.ObjectValueFrom(ctx, sniAttrTypes, m)
+	}
+
+	if len(ref) > 0 {
+		models = reorderByPlanOrder(ref, models, func(m *CDNSNIEntryModel) string {
+			return m.Host.ValueString()
+		})
+	}
+
+	elems := make([]attr.Value, len(models))
+	for i, m := range models {
+		obj, d := types.ObjectValueFrom(ctx, cdnSNIAttrTypes, m)
 		diags.Append(d...)
 		if diags.HasError() {
 			return
@@ -232,7 +261,7 @@ func (r *CDNSNIResource) readAndSetState(ctx context.Context, domainID int64, di
 		elems[i] = obj
 	}
 
-	list, d := types.ListValue(types.ObjectType{AttrTypes: sniAttrTypes}, elems)
+	list, d := types.ListValue(types.ObjectType{AttrTypes: cdnSNIAttrTypes}, elems)
 	diags.Append(d...)
 	if diags.HasError() {
 		return

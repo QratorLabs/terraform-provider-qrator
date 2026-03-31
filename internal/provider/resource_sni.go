@@ -204,7 +204,7 @@ func (r *SNIResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	newLinks, err := r.readSNILinks(ctx, id, &resp.Diagnostics)
+	newLinks, err := r.readSNILinks(ctx, id, &resp.Diagnostics, sniEntries)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read SNI after create", err.Error())
 		return
@@ -221,11 +221,21 @@ func (r *SNIResource) Create(ctx context.Context, req resource.CreateRequest, re
 func (r *SNIResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var prevLinks types.List
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("links"), &prevLinks)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	links, err := r.readSNILinks(ctx, entityID.ValueInt64(), &resp.Diagnostics)
+	var prevEntries []SNIEntryModel
+	if !prevLinks.IsNull() && !prevLinks.IsUnknown() {
+		resp.Diagnostics.Append(prevLinks.ElementsAs(ctx, &prevEntries, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	links, err := r.readSNILinks(ctx, entityID.ValueInt64(), &resp.Diagnostics, prevEntries)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read SNI", err.Error())
 		return
@@ -257,7 +267,13 @@ func (r *SNIResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	links, err := r.readSNILinks(ctx, id, &resp.Diagnostics)
+	var planEntries []SNIEntryModel
+	resp.Diagnostics.Append(planLinks.ElementsAs(ctx, &planEntries, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	links, err := r.readSNILinks(ctx, id, &resp.Diagnostics, planEntries)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read SNI after update", err.Error())
 		return
@@ -308,7 +324,7 @@ func sniHostKey(m *SNIEntryModel) string {
 	return m.Host.ValueString()
 }
 
-func (r *SNIResource) readSNILinks(ctx context.Context, entityID int64, diags *diag.Diagnostics) (types.List, error) {
+func (r *SNIResource) readSNILinks(ctx context.Context, entityID int64, diags *diag.Diagnostics, ref []SNIEntryModel) (types.List, error) {
 	apiPath := r.entity.apiPath(entityID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, "sni_get", nil)
@@ -321,8 +337,13 @@ func (r *SNIResource) readSNILinks(ctx context.Context, entityID int64, diags *d
 		return types.ListNull(sniObjType()), fmt.Errorf("failed to parse SNI response: %w", err)
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("Read %s %d SNI: %d entries", r.entity, entityID, len(sniEntries)))
-	return entitySNIEntriesToList(ctx, sniEntries, diags), nil
+	models := apiSNIEntriesToModels(sniEntries)
+	if len(ref) > 0 {
+		models = reorderByPlanOrder(ref, models, sniHostKey)
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Read %s %d SNI: %d entries", r.entity, entityID, len(models)))
+	return sniModelsToList(ctx, models, diags), nil
 }
 
 // writeSNI replaces the full SNI state via sni_set. Used on Create.
@@ -435,10 +456,8 @@ func (r *SNIResource) updateSNI(ctx context.Context, apiPath string, plan, state
 	return nil
 }
 
-// entitySNIEntriesToList converts API SNI entries to a Terraform List value.
-func entitySNIEntriesToList(ctx context.Context, entries []sniAPIEntry, diags *diag.Diagnostics) types.List {
-	objType := sniObjType()
-
+// apiSNIEntriesToModels converts raw API SNI entries to SNIEntryModel slice.
+func apiSNIEntriesToModels(entries []sniAPIEntry) []SNIEntryModel {
 	models := make([]SNIEntryModel, len(entries))
 	for i, e := range entries {
 		models[i].LinkID = types.Int64Value(e.LinkID)
@@ -449,7 +468,12 @@ func entitySNIEntriesToList(ctx context.Context, entries []sniAPIEntry, diags *d
 		}
 		models[i].Certificate = types.Int64Value(e.Certificate)
 	}
+	return models
+}
 
+// sniModelsToList converts SNIEntryModel slice to a Terraform List value.
+func sniModelsToList(ctx context.Context, models []SNIEntryModel, diags *diag.Diagnostics) types.List {
+	objType := sniObjType()
 	elems := make([]attr.Value, len(models))
 	for i, m := range models {
 		obj, d := types.ObjectValueFrom(ctx, sniAttrTypes, m)
@@ -459,7 +483,6 @@ func entitySNIEntriesToList(ctx context.Context, entries []sniAPIEntry, diags *d
 		}
 		elems[i] = obj
 	}
-
 	list, d := types.ListValue(objType, elems)
 	diags.Append(d...)
 	return list
