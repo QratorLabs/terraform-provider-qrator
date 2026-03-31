@@ -22,6 +22,7 @@ var (
 	_ resource.Resource                   = &SNIResource{}
 	_ resource.ResourceWithImportState    = &SNIResource{}
 	_ resource.ResourceWithValidateConfig = &SNIResource{}
+	_ resource.ResourceWithModifyPlan     = &SNIResource{}
 )
 
 // SNIResource manages SNI configuration for a domain or service.
@@ -77,9 +78,6 @@ func (r *SNIResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 						"link_id": schema.Int64Attribute{
 							Description: "SNI link ID assigned by the API.",
 							Computed:    true,
-							PlanModifiers: []planmodifier.Int64{
-								int64planmodifier.UseStateForUnknown(),
-							},
 						},
 						"host": schema.StringAttribute{
 							Description: "The hostname, or null for the default certificate.",
@@ -162,6 +160,57 @@ func (r *SNIResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 		resp.Diagnostics.AddAttributeError(path.Root("links"),
 			"Missing default SNI entry", "Non-empty SNI list must include an entry with null host (default certificate)")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// ModifyPlan
+// ---------------------------------------------------------------------------
+
+// ModifyPlan assigns link_ids from prior state by matching on host, so that
+// unchanged entries don't show "(known after apply)" on every plan.
+func (r *SNIResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+
+	var planLinks, stateLinks types.List
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("links"), &planLinks)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("links"), &stateLinks)...)
+	if resp.Diagnostics.HasError() || planLinks.IsNull() || planLinks.IsUnknown() || stateLinks.IsNull() || stateLinks.IsUnknown() {
+		return
+	}
+
+	var planEntries, stateEntries []SNIEntryModel
+	resp.Diagnostics.Append(planLinks.ElementsAs(ctx, &planEntries, false)...)
+	resp.Diagnostics.Append(stateLinks.ElementsAs(ctx, &stateEntries, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	idByHost := make(map[string]types.Int64, len(stateEntries))
+	for _, e := range stateEntries {
+		if !e.LinkID.IsNull() && !e.LinkID.IsUnknown() {
+			idByHost[sniHostKey(&e)] = e.LinkID
+		}
+	}
+
+	changed := false
+	for i := range planEntries {
+		if id, ok := idByHost[sniHostKey(&planEntries[i])]; ok {
+			planEntries[i].LinkID = id
+			changed = true
+		}
+	}
+
+	if !changed {
+		return
+	}
+
+	newList := sniModelsToList(ctx, planEntries, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("links"), newList)...)
 }
 
 // ---------------------------------------------------------------------------
