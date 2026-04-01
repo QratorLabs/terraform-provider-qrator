@@ -205,12 +205,25 @@ func (r *CDNResource) ImportState(ctx context.Context, req resource.ImportStateR
 
 func (r *CDNResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan CDNModel
-	diags := req.Plan.Get(ctx, &plan)
-	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.State.Set(ctx, &plan)
+
+	domainID := plan.DomainID.ValueInt64()
+	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
+
+	// CDN always exists in the API; Create applies the plan settings, then
+	// reads back to populate computed fields (e.g. default_host).
+	if !r.applyPlanToAPI(ctx, apiPath, plan, CDNModel{}, &resp.Diagnostics) {
+		return
+	}
+
+	result, ok := r.readCDNModel(ctx, domainID, &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &result)...)
 }
 
 func (r *CDNResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -229,14 +242,43 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	domainID := plan.DomainID.ValueInt64()
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
+	if !r.applyPlanToAPI(ctx, apiPath, plan, state, &resp.Diagnostics) {
+		return
+	}
+
+	result, ok := r.readCDNModel(ctx, domainID, &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &result)...)
+}
+
+func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state CDNModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	result, ok := r.readCDNModel(ctx, state.DomainID.ValueInt64(), &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &result)...)
+}
+
+// applyPlanToAPI sends changed plan settings to the CDN API.
+// state is the prior state; pass CDNModel{} when creating.
+// Returns false if any API call failed (diagnostics already set).
+func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, state CDNModel, diags *diag.Diagnostics) bool {
 	// access_control_allow_origin
 	if !IsNullOrUnknown(plan.AccessControlAllowOrigin) &&
 		ShouldUpdateList(plan.AccessControlAllowOrigin, state.AccessControlAllowOrigin, true) {
 		var values []string
 		plan.AccessControlAllowOrigin.ElementsAs(ctx, &values, false)
 		if _, err := r.client.MakeRequest(ctx, apiPath, "access_control_allow_origin_set", values); err != nil {
-			resp.Diagnostics.AddError("Failed to update access_control_allow_origin", err.Error())
-			return
+			diags.AddError("Failed to update access_control_allow_origin", err.Error())
+			return false
 		}
 	}
 
@@ -245,8 +287,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		(state.CacheControl.IsNull() || plan.CacheControl.ValueString() != state.CacheControl.ValueString()) {
 		param := cacheControlToAPI(plan.CacheControl.ValueString())
 		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_control_set", param); err != nil {
-			resp.Diagnostics.AddError("Failed to update cache_control", err.Error())
-			return
+			diags.AddError("Failed to update cache_control", err.Error())
+			return false
 		}
 	}
 
@@ -254,15 +296,15 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if plan.RedirectCode.IsNull() {
 		if !state.RedirectCode.IsNull() {
 			if _, err := r.client.MakeRequest(ctx, apiPath, "redirect_set", nil); err != nil {
-				resp.Diagnostics.AddError("Failed to disable redirect", err.Error())
-				return
+				diags.AddError("Failed to disable redirect", err.Error())
+				return false
 			}
 		}
 	} else if !plan.RedirectCode.IsUnknown() {
 		if state.RedirectCode.IsNull() || plan.RedirectCode.ValueInt64() != state.RedirectCode.ValueInt64() {
 			if _, err := r.client.MakeRequest(ctx, apiPath, "redirect_set", plan.RedirectCode.ValueInt64()); err != nil {
-				resp.Diagnostics.AddError("Failed to update redirect_code", err.Error())
-				return
+				diags.AddError("Failed to update redirect_code", err.Error())
+				return false
 			}
 		}
 	}
@@ -271,8 +313,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !IsNullOrUnknown(plan.ClientNoCache) &&
 		(state.ClientNoCache.IsNull() || plan.ClientNoCache.ValueBool() != state.ClientNoCache.ValueBool()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "client_no_cache_set", plan.ClientNoCache.ValueBool()); err != nil {
-			resp.Diagnostics.AddError("Failed to update client_no_cache", err.Error())
-			return
+			diags.AddError("Failed to update client_no_cache", err.Error())
+			return false
 		}
 	}
 
@@ -280,8 +322,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !IsNullOrUnknown(plan.CacheIgnoreParams) &&
 		(state.CacheIgnoreParams.IsNull() || plan.CacheIgnoreParams.ValueBool() != state.CacheIgnoreParams.ValueBool()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_ignore_params_set", plan.CacheIgnoreParams.ValueBool()); err != nil {
-			resp.Diagnostics.AddError("Failed to update cache_ignore_params", err.Error())
-			return
+			diags.AddError("Failed to update cache_ignore_params", err.Error())
+			return false
 		}
 	}
 
@@ -291,8 +333,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		var values []string
 		plan.ClientHeaders.ElementsAs(ctx, &values, false)
 		if _, err := r.client.MakeRequest(ctx, apiPath, "client_headers_set", values); err != nil {
-			resp.Diagnostics.AddError("Failed to update client_headers", err.Error())
-			return
+			diags.AddError("Failed to update client_headers", err.Error())
+			return false
 		}
 	}
 
@@ -300,8 +342,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !IsNullOrUnknown(plan.ClientIPHeader) &&
 		(state.ClientIPHeader.IsNull() || plan.ClientIPHeader.ValueString() != state.ClientIPHeader.ValueString()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "client_ip_header_set", plan.ClientIPHeader.ValueString()); err != nil {
-			resp.Diagnostics.AddError("Failed to update client_ip_header", err.Error())
-			return
+			diags.AddError("Failed to update client_ip_header", err.Error())
+			return false
 		}
 	}
 
@@ -311,8 +353,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		var values []string
 		plan.UpstreamHeaders.ElementsAs(ctx, &values, false)
 		if _, err := r.client.MakeRequest(ctx, apiPath, "upstream_headers_set", values); err != nil {
-			resp.Diagnostics.AddError("Failed to update upstream_headers", err.Error())
-			return
+			diags.AddError("Failed to update upstream_headers", err.Error())
+			return false
 		}
 	}
 
@@ -320,22 +362,22 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !IsNullOrUnknown(plan.HTTP2) &&
 		(state.HTTP2.IsNull() || plan.HTTP2.ValueBool() != state.HTTP2.ValueBool()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "http2_set", plan.HTTP2.ValueBool()); err != nil {
-			resp.Diagnostics.AddError("Failed to update http2", err.Error())
-			return
+			diags.AddError("Failed to update http2", err.Error())
+			return false
 		}
 	}
 
 	// cache_errors
 	if !IsNullOrUnknown(plan.CacheErrors) {
-		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_set", plan.CacheErrors, state.CacheErrors, &resp.Diagnostics); err != nil {
-			return
+		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_set", plan.CacheErrors, state.CacheErrors, diags); err != nil {
+			return false
 		}
 	}
 
 	// cache_errors_permanent
 	if !IsNullOrUnknown(plan.CacheErrorsPermanent) {
-		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_permanent_set", plan.CacheErrorsPermanent, state.CacheErrorsPermanent, &resp.Diagnostics); err != nil {
-			return
+		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_permanent_set", plan.CacheErrorsPermanent, state.CacheErrorsPermanent, diags); err != nil {
+			return false
 		}
 	}
 
@@ -345,15 +387,15 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		var values []string
 		plan.CompressDisabled.ElementsAs(ctx, &values, false)
 		if _, err := r.client.MakeRequest(ctx, apiPath, "compress_disabled_set", values); err != nil {
-			resp.Diagnostics.AddError("Failed to update compress_disabled", err.Error())
-			return
+			diags.AddError("Failed to update compress_disabled", err.Error())
+			return false
 		}
 	}
 
 	// blocked_uri
 	if !IsNullOrUnknown(plan.BlockedURI) {
-		if err := r.updateBlockedURI(ctx, apiPath, plan.BlockedURI, state.BlockedURI, &resp.Diagnostics); err != nil {
-			return
+		if err := r.updateBlockedURI(ctx, apiPath, plan.BlockedURI, state.BlockedURI, diags); err != nil {
+			return false
 		}
 	}
 
@@ -363,8 +405,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		var values []string
 		plan.WhiteURI.ElementsAs(ctx, &values, false)
 		if _, err := r.client.MakeRequest(ctx, apiPath, "white_uri_set", values); err != nil {
-			resp.Diagnostics.AddError("Failed to update white_uri", err.Error())
-			return
+			diags.AddError("Failed to update white_uri", err.Error())
+			return false
 		}
 	}
 
@@ -372,23 +414,16 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !IsNullOrUnknown(plan.WebP) &&
 		(state.WebP.IsNull() || plan.WebP.ValueInt64() != state.WebP.ValueInt64()) {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "webp_set", plan.WebP.ValueInt64()); err != nil {
-			resp.Diagnostics.AddError("Failed to update webp", err.Error())
-			return
+			diags.AddError("Failed to update webp", err.Error())
+			return false
 		}
 	}
 
-	resp.State.Set(ctx, &plan)
+	return true
 }
 
-func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state CDNModel
-	diags := req.State.Get(ctx, &state)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	domainID := state.DomainID.ValueInt64()
+// readCDNModel fetches all CDN settings from the API and returns a populated CDNModel.
+func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, diags *diag.Diagnostics) (CDNModel, bool) {
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
 	var (
@@ -547,15 +582,17 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	})
 
 	if err := g.Wait(); err != nil {
-		resp.Diagnostics.AddError("Failed to read CDN settings", err.Error())
-		return
+		diags.AddError("Failed to read CDN settings", err.Error())
+		return CDNModel{}, false
 	}
 
+	var state CDNModel
+	state.DomainID = types.Int64Value(domainID)
 	state.AccessControlAllowOrigin, _ = types.ListValueFrom(ctx, types.StringType, accessControlAllowOrigin)
 	cc, err := parseCacheControl(cacheControlRaw)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to parse cache_control", err.Error())
-		return
+		diags.AddError("Failed to parse cache_control", err.Error())
+		return CDNModel{}, false
 	}
 	state.CacheControl = types.StringValue(cc)
 	if redirectCode == nil {
@@ -579,22 +616,22 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 	state.HTTP2 = types.BoolValue(http2)
 
-	state.CacheErrors = cacheErrorEntriesToList(ctx, cacheErrors, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	state.CacheErrors = cacheErrorEntriesToList(ctx, cacheErrors, diags)
+	if diags.HasError() {
+		return CDNModel{}, false
 	}
 
-	state.CacheErrorsPermanent = cacheErrorEntriesToList(ctx, cacheErrorsPermanent, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	state.CacheErrorsPermanent = cacheErrorEntriesToList(ctx, cacheErrorsPermanent, diags)
+	if diags.HasError() {
+		return CDNModel{}, false
 	}
 
 	state.CompressDisabled, _ = types.ListValueFrom(ctx, types.StringType, compressDisabled)
 	state.CompressDisabled, _ = NormalizeStringList(ctx, state.CompressDisabled)
 
-	state.BlockedURI = blockedURIEntriesToList(ctx, blockedURIEntries, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	state.BlockedURI = blockedURIEntriesToList(ctx, blockedURIEntries, diags)
+	if diags.HasError() {
+		return CDNModel{}, false
 	}
 
 	state.WhiteURI, _ = types.ListValueFrom(ctx, types.StringType, whiteURI)
@@ -603,7 +640,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	state.WebP = types.Int64Value(webp)
 	state.DefaultHost = types.StringValue(defaultHost)
 
-	resp.State.Set(ctx, &state)
+	return state, true
 }
 
 // cdnCacheErrorEntry represents the API structure for a CDN cache error entry.
