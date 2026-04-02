@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -123,12 +124,18 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"code": schema.Int64Attribute{
-							Description: "HTTP status code from upstream to cache.",
+							Description: "HTTP status code from upstream to cache. Allowed values: 204, 305, 400, 403, 404, 414, 500, 501, 502, 503, 504.",
 							Required:    true,
+							Validators: []validator.Int64{
+								int64validator.OneOf(204, 305, 400, 403, 404, 414, 500, 501, 502, 503, 504),
+							},
 						},
 						"timeout": schema.Int64Attribute{
-							Description: "Timeout in milliseconds before the next request is allowed.",
+							Description: "Timeout in milliseconds before the next request is allowed (60000–300000).",
 							Required:    true,
+							Validators: []validator.Int64{
+								int64validator.Between(60000, 300000),
+							},
 						},
 					},
 				},
@@ -140,12 +147,18 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"code": schema.Int64Attribute{
-							Description: "HTTP status code from upstream to cache.",
+							Description: "HTTP status code from upstream to cache. Allowed values: 204, 305, 400, 403, 404, 414, 500, 501, 502, 503, 504.",
 							Required:    true,
+							Validators: []validator.Int64{
+								int64validator.OneOf(204, 305, 400, 403, 404, 414, 500, 501, 502, 503, 504),
+							},
 						},
 						"timeout": schema.Int64Attribute{
-							Description: "Timeout in milliseconds before the next request from the same client IP is allowed.",
+							Description: "Timeout in milliseconds before the next request from the same client IP is allowed (60000–300000).",
 							Required:    true,
+							Validators: []validator.Int64{
+								int64validator.Between(60000, 300000),
+							},
 						},
 					},
 				},
@@ -171,6 +184,9 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 			"default_host": schema.StringAttribute{
 				Description: "Default configured hostname returned by the API.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -219,7 +235,8 @@ func (r *CDNResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	result, ok := r.readCDNModel(ctx, domainID, &resp.Diagnostics)
+	// plan.DefaultHost is unknown on first create — readCDNModel will fetch it.
+	result, ok := r.readCDNModel(ctx, domainID, plan.DefaultHost, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -246,7 +263,8 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	result, ok := r.readCDNModel(ctx, domainID, &resp.Diagnostics)
+	// plan.DefaultHost is already known (UseStateForUnknown copies it from state).
+	result, ok := r.readCDNModel(ctx, domainID, plan.DefaultHost, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -260,7 +278,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
-	result, ok := r.readCDNModel(ctx, state.DomainID.ValueInt64(), &resp.Diagnostics)
+	result, ok := r.readCDNModel(ctx, state.DomainID.ValueInt64(), state.DefaultHost, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -423,7 +441,8 @@ func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, 
 }
 
 // readCDNModel fetches all CDN settings from the API and returns a populated CDNModel.
-func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, diags *diag.Diagnostics) (CDNModel, bool) {
+// prevDefaultHost is the already-known default_host value; if known, the API call is skipped.
+func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, prevDefaultHost types.String, diags *diag.Diagnostics) (CDNModel, bool) {
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
 	var (
@@ -573,13 +592,15 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, diags *d
 		return json.Unmarshal(v, &webp)
 	})
 
-	g.Go(func() error {
-		v, err := r.client.MakeRequest(gctx, apiPath, "default_host", nil)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(v, &defaultHost)
-	})
+	if prevDefaultHost.IsUnknown() || prevDefaultHost.IsNull() {
+		g.Go(func() error {
+			v, err := r.client.MakeRequest(gctx, apiPath, "default_host", nil)
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(v, &defaultHost)
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		diags.AddError("Failed to read CDN settings", err.Error())
@@ -638,7 +659,11 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, diags *d
 	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
 
 	state.WebP = types.Int64Value(webp)
-	state.DefaultHost = types.StringValue(defaultHost)
+	if prevDefaultHost.IsUnknown() || prevDefaultHost.IsNull() {
+		state.DefaultHost = types.StringValue(defaultHost)
+	} else {
+		state.DefaultHost = prevDefaultHost
+	}
 
 	return state, true
 }

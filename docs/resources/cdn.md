@@ -32,13 +32,13 @@ resource "qrator_cdn" "example" {
   cache_errors = [
     {
       code    = 502
-      timeout = 5000
+      timeout = 60000
     }
   ]
 
   cache_errors_permanent = [
     {
-      code    = 429
+      code    = 503
       timeout = 60000
     }
   ]
@@ -85,8 +85,8 @@ terraform import qrator_cdn.example 12345
 - `redirect_code` (Number) HTTP-to-HTTPS redirect status code returned by CDN edge nodes. Must be `301`, `302`, `307`, or `308`. Leave unset to disable.
 - `upstream_headers` (List of String) Headers that will be added to every request sent by CDN to upstream. Format: `header:value`.
 - `blocked_uri` (Block List) List of URI patterns to block. Each entry specifies a regex pattern and an HTTP response code.
-- `cache_errors` (Block List) Cache error responses from upstream. If upstream returns a matching status code, the next request for the same resource is delayed by the specified timeout (ms).
-- `cache_errors_permanent` (Block List) Permanently cache error responses per client IP. If upstream returns a matching status code, the response is cached for the client IP for the specified timeout (ms).
+- `cache_errors` (Block List) Cache error responses from upstream. If upstream returns a matching status code, the next request for the same resource is delayed by the specified timeout (ms). See [Nested Schema for `cache_errors`](#nested-schema-for-cache_errors) for allowed values.
+- `cache_errors_permanent` (Block List) Permanently cache error responses per client IP. If upstream returns a matching status code, the response is cached for the client IP for the specified timeout (ms). See [Nested Schema for `cache_errors_permanent`](#nested-schema-for-cache_errors_permanent) for allowed values.
 - `client_no_cache` (Boolean) If enabled, no cache headers beside cache-control: no-cache are sent to client.
 - `compress_disabled` (List of String) List of compression algorithms to disable. Allowed values: `gzip`, `deflate`, `br`.
 - `http2` (Boolean) Enable CDN support for HTTP/2 (in addition to HTTP/1.1).
@@ -104,11 +104,11 @@ terraform import qrator_cdn.example 12345
 
 ### Nested Schema for `cache_errors`
 
-- `code` (Number, Required) HTTP status code from upstream to cache.
-- `timeout` (Number, Required) Timeout in milliseconds before the next request is allowed.
+- `code` (Number, Required) HTTP status code from upstream to cache. Allowed values: `204`, `305`, `400`, `403`, `404`, `414`, `500`, `501`, `502`, `503`, `504`.
+- `timeout` (Number, Required) Timeout in milliseconds before the next request is allowed. Must be between `60000` and `300000`.
 
 ### Nested Schema for `cache_errors_permanent`
 
-- `code` (Number, Required) HTTP status code from upstream to cache.
-- `timeout` (Number, Required) Timeout in milliseconds before the next request from the same client IP is allowed.
+- `code` (Number, Required) HTTP status code from upstream to cache. Allowed values: `204`, `305`, `400`, `403`, `404`, `414`, `500`, `501`, `502`, `503`, `504`.
+- `timeout` (Number, Required) Timeout in milliseconds before the next request from the same client IP is allowed. Must be between `60000` and `300000`.
 
