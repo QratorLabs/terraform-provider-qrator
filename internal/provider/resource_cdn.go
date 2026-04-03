@@ -236,7 +236,7 @@ func (r *CDNResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	// plan.DefaultHost is unknown on first create — readCDNModel will fetch it.
-	result, ok := r.readCDNModel(ctx, domainID, plan.DefaultHost, &resp.Diagnostics)
+	result, ok := r.readCDNModel(ctx, domainID, plan, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -264,7 +264,7 @@ func (r *CDNResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// plan.DefaultHost is already known (UseStateForUnknown copies it from state).
-	result, ok := r.readCDNModel(ctx, domainID, plan.DefaultHost, &resp.Diagnostics)
+	result, ok := r.readCDNModel(ctx, domainID, plan, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -278,7 +278,7 @@ func (r *CDNResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
-	result, ok := r.readCDNModel(ctx, state.DomainID.ValueInt64(), state.DefaultHost, &resp.Diagnostics)
+	result, ok := r.readCDNModel(ctx, state.DomainID.ValueInt64(), state, &resp.Diagnostics)
 	if !ok {
 		return
 	}
@@ -441,8 +441,9 @@ func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, 
 }
 
 // readCDNModel fetches all CDN settings from the API and returns a populated CDNModel.
-// prevDefaultHost is the already-known default_host value; if known, the API call is skipped.
-func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, prevDefaultHost types.String, diags *diag.Diagnostics) (CDNModel, bool) {
+// ref provides previously-known values: default_host is re-fetched only if unknown/null,
+// and list fields are used to restore user-defined order after the API read.
+func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNModel, diags *diag.Diagnostics) (CDNModel, bool) {
 	apiPath := fmt.Sprintf("/request/cdn/%d", domainID)
 
 	var (
@@ -592,7 +593,7 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, prevDefa
 		return json.Unmarshal(v, &webp)
 	})
 
-	if prevDefaultHost.IsUnknown() || prevDefaultHost.IsNull() {
+	if ref.DefaultHost.IsUnknown() || ref.DefaultHost.IsNull() {
 		g.Go(func() error {
 			v, err := r.client.MakeRequest(gctx, apiPath, "default_host", nil)
 			if err != nil {
@@ -607,9 +608,46 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, prevDefa
 		return CDNModel{}, false
 	}
 
+	// Parse ref lists for reordering API results to match user-defined order.
+	var refACLO, refClientHeaders, refUpstreamHeaders, refCompressDisabled, refWhiteURI []string
+	var refCacheErrors, refCacheErrorsPermanent []CDNCacheErrorEntryModel
+	var refBlockedURI []CDNBlockedURIEntryModel
+	if !IsNullOrUnknown(ref.AccessControlAllowOrigin) {
+		ref.AccessControlAllowOrigin.ElementsAs(ctx, &refACLO, false)
+	}
+	if !IsNullOrUnknown(ref.ClientHeaders) {
+		ref.ClientHeaders.ElementsAs(ctx, &refClientHeaders, false)
+	}
+	if !IsNullOrUnknown(ref.UpstreamHeaders) {
+		ref.UpstreamHeaders.ElementsAs(ctx, &refUpstreamHeaders, false)
+	}
+	if !IsNullOrUnknown(ref.CompressDisabled) {
+		ref.CompressDisabled.ElementsAs(ctx, &refCompressDisabled, false)
+	}
+	if !IsNullOrUnknown(ref.WhiteURI) {
+		ref.WhiteURI.ElementsAs(ctx, &refWhiteURI, false)
+	}
+	if !IsNullOrUnknown(ref.CacheErrors) {
+		ref.CacheErrors.ElementsAs(ctx, &refCacheErrors, false)
+	}
+	if !IsNullOrUnknown(ref.CacheErrorsPermanent) {
+		ref.CacheErrorsPermanent.ElementsAs(ctx, &refCacheErrorsPermanent, false)
+	}
+	if !IsNullOrUnknown(ref.BlockedURI) {
+		ref.BlockedURI.ElementsAs(ctx, &refBlockedURI, false)
+	}
+
+	strKey := func(s *string) string { return *s }
+	ceKey := func(m *CDNCacheErrorEntryModel) string { return strconv.FormatInt(m.Code.ValueInt64(), 10) }
+	buKey := func(m *CDNBlockedURIEntryModel) string { return m.URI.ValueString() }
+
 	var state CDNModel
 	state.DomainID = types.Int64Value(domainID)
-	state.AccessControlAllowOrigin, _ = types.ListValueFrom(ctx, types.StringType, accessControlAllowOrigin)
+
+	aclO := reorderByPlanOrder(refACLO, accessControlAllowOrigin, strKey)
+	state.AccessControlAllowOrigin, _ = types.ListValueFrom(ctx, types.StringType, aclO)
+	state.AccessControlAllowOrigin, _ = NormalizeStringList(ctx, state.AccessControlAllowOrigin)
+
 	cc, err := parseCacheControl(cacheControlRaw)
 	if err != nil {
 		diags.AddError("Failed to parse cache_control", err.Error())
@@ -623,46 +661,54 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, prevDefa
 	}
 	state.ClientNoCache = types.BoolValue(clientNoCache)
 	state.CacheIgnoreParams = types.BoolValue(cacheIgnoreParams)
-	state.ClientHeaders, _ = types.ListValueFrom(ctx, types.StringType, clientHeaders)
+
+	ch := reorderByPlanOrder(refClientHeaders, clientHeaders, strKey)
+	state.ClientHeaders, _ = types.ListValueFrom(ctx, types.StringType, ch)
+	state.ClientHeaders, _ = NormalizeStringList(ctx, state.ClientHeaders)
+
 	if clientIPHeader == nil {
 		state.ClientIPHeader = types.StringNull()
 	} else {
 		state.ClientIPHeader = types.StringValue(*clientIPHeader)
 	}
-	state.UpstreamHeaders, _ = types.ListValueFrom(ctx, types.StringType, upstreamHeaders)
 
-	state.AccessControlAllowOrigin, _ = NormalizeStringList(ctx, state.AccessControlAllowOrigin)
-	state.ClientHeaders, _ = NormalizeStringList(ctx, state.ClientHeaders)
+	uh := reorderByPlanOrder(refUpstreamHeaders, upstreamHeaders, strKey)
+	state.UpstreamHeaders, _ = types.ListValueFrom(ctx, types.StringType, uh)
 	state.UpstreamHeaders, _ = NormalizeStringList(ctx, state.UpstreamHeaders)
 
 	state.HTTP2 = types.BoolValue(http2)
 
-	state.CacheErrors = cacheErrorEntriesToList(ctx, cacheErrors, diags)
+	ceModels := reorderByPlanOrder(refCacheErrors, cacheErrorEntriesToModels(cacheErrors), ceKey)
+	state.CacheErrors = cacheErrorModelsToList(ctx, ceModels, diags)
 	if diags.HasError() {
 		return CDNModel{}, false
 	}
 
-	state.CacheErrorsPermanent = cacheErrorEntriesToList(ctx, cacheErrorsPermanent, diags)
+	cePermModels := reorderByPlanOrder(refCacheErrorsPermanent, cacheErrorEntriesToModels(cacheErrorsPermanent), ceKey)
+	state.CacheErrorsPermanent = cacheErrorModelsToList(ctx, cePermModels, diags)
 	if diags.HasError() {
 		return CDNModel{}, false
 	}
 
-	state.CompressDisabled, _ = types.ListValueFrom(ctx, types.StringType, compressDisabled)
+	cd := reorderByPlanOrder(refCompressDisabled, compressDisabled, strKey)
+	state.CompressDisabled, _ = types.ListValueFrom(ctx, types.StringType, cd)
 	state.CompressDisabled, _ = NormalizeStringList(ctx, state.CompressDisabled)
 
-	state.BlockedURI = blockedURIEntriesToList(ctx, blockedURIEntries, diags)
+	buModels := reorderByPlanOrder(refBlockedURI, blockedURIEntriesToModels(blockedURIEntries), buKey)
+	state.BlockedURI = blockedURIModelsToList(ctx, buModels, diags)
 	if diags.HasError() {
 		return CDNModel{}, false
 	}
 
-	state.WhiteURI, _ = types.ListValueFrom(ctx, types.StringType, whiteURI)
+	wu := reorderByPlanOrder(refWhiteURI, whiteURI, strKey)
+	state.WhiteURI, _ = types.ListValueFrom(ctx, types.StringType, wu)
 	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
 
 	state.WebP = types.Int64Value(webp)
-	if prevDefaultHost.IsUnknown() || prevDefaultHost.IsNull() {
+	if ref.DefaultHost.IsUnknown() || ref.DefaultHost.IsNull() {
 		state.DefaultHost = types.StringValue(defaultHost)
 	} else {
-		state.DefaultHost = prevDefaultHost
+		state.DefaultHost = ref.DefaultHost
 	}
 
 	return state, true
@@ -738,8 +784,8 @@ func cacheErrorEntriesEqual(a, b []CDNCacheErrorEntryModel) bool {
 	return true
 }
 
-// cacheErrorEntriesToList converts API cache error entries to a Terraform List value.
-func cacheErrorEntriesToList(ctx context.Context, entries []cdnCacheErrorEntry, diags *diag.Diagnostics) types.List {
+// cacheErrorEntriesToModels converts API cache error entries to model structs.
+func cacheErrorEntriesToModels(entries []cdnCacheErrorEntry) []CDNCacheErrorEntryModel {
 	models := make([]CDNCacheErrorEntryModel, len(entries))
 	for i, e := range entries {
 		models[i] = CDNCacheErrorEntryModel{
@@ -747,7 +793,11 @@ func cacheErrorEntriesToList(ctx context.Context, entries []cdnCacheErrorEntry, 
 			Timeout: types.Int64Value(e.Timeout),
 		}
 	}
+	return models
+}
 
+// cacheErrorModelsToList converts model structs to a Terraform List value.
+func cacheErrorModelsToList(ctx context.Context, models []CDNCacheErrorEntryModel, diags *diag.Diagnostics) types.List {
 	elems := make([]attr.Value, len(models))
 	for i, m := range models {
 		obj, d := types.ObjectValueFrom(ctx, cacheErrorAttrTypes, m)
@@ -757,10 +807,14 @@ func cacheErrorEntriesToList(ctx context.Context, entries []cdnCacheErrorEntry, 
 		}
 		elems[i] = obj
 	}
-
 	list, d := types.ListValue(types.ObjectType{AttrTypes: cacheErrorAttrTypes}, elems)
 	diags.Append(d...)
 	return list
+}
+
+// cacheErrorEntriesToList converts API cache error entries to a Terraform List value.
+func cacheErrorEntriesToList(ctx context.Context, entries []cdnCacheErrorEntry, diags *diag.Diagnostics) types.List {
+	return cacheErrorModelsToList(ctx, cacheErrorEntriesToModels(entries), diags)
 }
 
 // cdnBlockedURIEntry represents the API structure for a CDN blocked URI entry.
@@ -823,8 +877,8 @@ func blockedURIEntriesEqual(a, b []CDNBlockedURIEntryModel) bool {
 	return true
 }
 
-// blockedURIEntriesToList converts API blocked URI entries to a Terraform List value.
-func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, diags *diag.Diagnostics) types.List {
+// blockedURIEntriesToModels converts API blocked URI entries to model structs.
+func blockedURIEntriesToModels(entries []cdnBlockedURIEntry) []CDNBlockedURIEntryModel {
 	models := make([]CDNBlockedURIEntryModel, len(entries))
 	for i, e := range entries {
 		models[i] = CDNBlockedURIEntryModel{
@@ -832,7 +886,11 @@ func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, 
 			Code: types.Int64Value(e.Code),
 		}
 	}
+	return models
+}
 
+// blockedURIModelsToList converts model structs to a Terraform List value.
+func blockedURIModelsToList(ctx context.Context, models []CDNBlockedURIEntryModel, diags *diag.Diagnostics) types.List {
 	elems := make([]attr.Value, len(models))
 	for i, m := range models {
 		obj, d := types.ObjectValueFrom(ctx, blockedURIAttrTypes, m)
@@ -842,10 +900,14 @@ func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, 
 		}
 		elems[i] = obj
 	}
-
 	list, d := types.ListValue(types.ObjectType{AttrTypes: blockedURIAttrTypes}, elems)
 	diags.Append(d...)
 	return list
+}
+
+// blockedURIEntriesToList converts API blocked URI entries to a Terraform List value.
+func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, diags *diag.Diagnostics) types.List {
+	return blockedURIModelsToList(ctx, blockedURIEntriesToModels(entries), diags)
 }
 
 // parseCacheControl converts the API response for cache_control_get into a
