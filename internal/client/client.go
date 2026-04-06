@@ -16,6 +16,12 @@ import (
 	"time"
 )
 
+
+// QratorClientAPI is the interface used by provider resources to communicate
+// with the Qrator API. *QratorClient satisfies this interface.
+type QratorClientAPI interface {
+	MakeRequest(ctx context.Context, path string, method string, params interface{}) (json.RawMessage, error)
+}
 // QratorClient is a client for interacting with the Qrator API.
 // It manages HTTP requests with authentication, debug logging, and retry logic.
 type QratorClient struct {

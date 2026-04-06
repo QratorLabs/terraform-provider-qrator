@@ -26,7 +26,7 @@ import (
 )
 
 type CDNResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 }
 
 func NewCDNResource() resource.Resource {

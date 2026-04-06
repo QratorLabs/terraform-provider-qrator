@@ -69,7 +69,7 @@ var (
 )
 
 type IPListResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 	entity entityKind
 	kind   ipListKind
 }

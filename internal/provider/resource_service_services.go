@@ -29,7 +29,7 @@ var (
 )
 
 type ServiceServicesResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 }
 
 func NewServiceServicesResource() resource.Resource {

@@ -25,7 +25,7 @@ var (
 )
 
 type CDNSNIResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 }
 
 func NewCDNSNIResource() resource.Resource {

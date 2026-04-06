@@ -24,7 +24,7 @@ const (
 )
 
 type ClientCertificateResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 }
 
 type retryConfig struct {

@@ -28,7 +28,7 @@ var (
 )
 
 type DomainServicesResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 }
 
 func NewDomainServicesResource() resource.Resource {

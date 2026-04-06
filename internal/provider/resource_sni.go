@@ -27,7 +27,7 @@ var (
 
 // SNIResource manages SNI configuration for a domain or service.
 type SNIResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 	entity entityKind
 }
 

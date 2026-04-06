@@ -28,7 +28,7 @@ var (
 
 // EntityResource manages a domain or service entity.
 type EntityResource struct {
-	client *client.QratorClient
+	client client.QratorClientAPI
 	entity entityKind
 }
 
