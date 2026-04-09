@@ -22,6 +22,16 @@ resource "qrator_domain" "example" {
 }
 ```
 
+### With maintenance mode
+
+```terraform
+resource "qrator_domain" "example" {
+  client_id         = var.client_id
+  name              = "example.com"
+  maintenance_until = 1775520000 # 2026-04-07T00:00:00Z
+}
+```
+
 ## Import
 
 Existing domains can be imported using the domain ID:
@@ -39,6 +49,10 @@ After import, the first `terraform plan` will show a diff for `client_id` and `n
 
 - `client_id` (Number) The client ID used when creating the domain.
 - `name` (String) The domain name.
+
+### Optional
+
+- `maintenance_until` (Number) Unix timestamp (seconds) until which maintenance mode is active. When maintenance mode is enabled, the system applies softer filtering settings and does not respond to application errors. Set to `null` or omit to disable.
 
 ### Read-Only
 

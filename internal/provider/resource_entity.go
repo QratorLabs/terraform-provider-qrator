@@ -65,6 +65,12 @@ func (r *EntityResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			Description: fmt.Sprintf("The %s name.", r.entity),
 			Required:    true,
 		},
+		"maintenance_until": schema.Int64Attribute{
+			Description: "Unix timestamp (seconds) until which maintenance mode is active. " +
+				"Null or omitted means maintenance mode is disabled.",
+			Optional: true,
+			Computed: true,
+		},
 	}
 
 	if r.entity == entityService {
@@ -221,6 +227,21 @@ func (r *EntityResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
+	// Set maintenance mode if explicitly requested.
+	var planUntil types.Int64
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("maintenance_until"), &planUntil)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !planUntil.IsNull() && !planUntil.IsUnknown() {
+		apiPath := r.entity.apiPath(entityID)
+		params := maintenanceModeResult{Until: planUntil.ValueInt64Pointer()}
+		if _, err := r.client.MakeRequest(ctx, apiPath, "maintenance_mode_set", params); err != nil {
+			resp.Diagnostics.AddError("Failed to set maintenance mode", err.Error())
+			return
+		}
+	}
+
 	// Read back from API and set state.
 	r.readAndSetState(ctx, entityID, &resp.State, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
@@ -355,6 +376,25 @@ func (r *EntityResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
+	// Update maintenance mode if changed.
+	var planUntil, stateUntil types.Int64
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("maintenance_until"), &planUntil)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("maintenance_until"), &stateUntil)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !planUntil.Equal(stateUntil) {
+		var until *int64
+		if !planUntil.IsNull() && !planUntil.IsUnknown() {
+			until = planUntil.ValueInt64Pointer()
+		}
+		params := maintenanceModeResult{Until: until}
+		if _, err := r.client.MakeRequest(ctx, apiPath, "maintenance_mode_set", params); err != nil {
+			resp.Diagnostics.AddError("Failed to set maintenance mode", err.Error())
+			return
+		}
+	}
+
 	r.readAndSetState(ctx, entityID, &resp.State, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -375,7 +415,12 @@ func (r *EntityResource) Delete(ctx context.Context, req resource.DeleteRequest,
 // Helpers
 // ---------------------------------------------------------------------------
 
-// readAndSetState reads name and status (for services) from the API.
+// maintenanceModeResult is the API response/param shape for maintenance_mode_get/set.
+type maintenanceModeResult struct {
+	Until *int64 `json:"until"`
+}
+
+// readAndSetState reads name, maintenance mode, and status (for services) from the API.
 func (r *EntityResource) readAndSetState(ctx context.Context, entityID int64, state *tfsdk.State, diags *diag.Diagnostics) {
 	apiPath := r.entity.apiPath(entityID)
 
@@ -389,6 +434,23 @@ func (r *EntityResource) readAndSetState(ctx context.Context, entityID int64, st
 	if err := json.Unmarshal(v, &name); err != nil {
 		diags.AddError("Failed to parse name", err.Error())
 		return
+	}
+
+	// Read maintenance mode.
+	mmRaw, err := r.client.MakeRequest(ctx, apiPath, "maintenance_mode_get", nil)
+	if err != nil {
+		diags.AddError("Failed to read maintenance mode", fmt.Sprintf("maintenance_mode_get failed: %s", err))
+		return
+	}
+	var mm maintenanceModeResult
+	if err := json.Unmarshal(mmRaw, &mm); err != nil {
+		diags.AddError("Failed to parse maintenance mode", err.Error())
+		return
+	}
+	if mm.Until != nil {
+		diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Value(*mm.Until))...)
+	} else {
+		diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Null())...)
 	}
 
 	// For service: read status. If API returns a transient value like "pending",

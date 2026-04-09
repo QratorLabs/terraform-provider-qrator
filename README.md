@@ -46,7 +46,7 @@ export QRATOR_ENDPOINT="https://api.qrator.net"
 
 | Resource | Description |
 |----------|-------------|
-| `qrator_domain` | Domain management (name, policy) |
+| `qrator_domain` | Domain management (name, maintenance mode) |
 | `qrator_domain_services` | Domain service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
 | `qrator_domain_sni` | Domain SNI hostname-to-certificate mappings |
 | `qrator_domain_whitelist` | Domain IP whitelist (allowed addresses) |
@@ -56,7 +56,7 @@ export QRATOR_ENDPOINT="https://api.qrator.net"
 
 | Resource | Description |
 |----------|-------------|
-| `qrator_service` | Service management (name, policy, status, upstream IPs) |
+| `qrator_service` | Service management (name, status, upstream IPs, maintenance mode) |
 | `qrator_service_services` | Service list (DNS, HTTP, ICMP, NAT, ingress/egress types) |
 | `qrator_service_sni` | Service SNI hostname-to-certificate mappings |
 | `qrator_service_whitelist` | Service IP whitelist (allowed addresses) |

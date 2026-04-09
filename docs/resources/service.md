@@ -23,6 +23,17 @@ resource "qrator_service" "example" {
 }
 ```
 
+### With maintenance mode
+
+```terraform
+resource "qrator_service" "example" {
+  client_id         = var.client_id
+  name              = "my-service"
+  ips               = ["10.0.0.1", "10.0.0.2"]
+  maintenance_until = 1775520000 # 2026-04-07T00:00:00Z
+}
+```
+
 ## Import
 
 Existing services can be imported using the service ID:
@@ -44,6 +55,7 @@ After import, the first `terraform plan` will show a diff for `client_id`, `name
 ### Optional
 
 - `ips` (List of String) List of upstream IP addresses for the service. Required when creating a new service. On import, populated automatically from the API.
+- `maintenance_until` (Number) Unix timestamp (seconds) until which maintenance mode is active. When maintenance mode is enabled, the system applies softer filtering settings and does not respond to application errors. Set to `null` or omit to disable.
 - `status` (String) Service status: `online` or `offline`. When creating a new service without this attribute, the service is set to `online`.
 
 ### Read-Only

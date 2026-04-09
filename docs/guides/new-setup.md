@@ -208,6 +208,43 @@ terraform apply
 
 ---
 
+---
+
+## Maintenance mode
+
+Both domains and services support a maintenance mode that applies softer filtering and ignores application errors for a defined time window. It is useful during planned deployments or configuration changes.
+
+Set `maintenance_until` to a Unix timestamp to enable maintenance mode, or omit / set to `null` to disable it:
+
+```terraform
+resource "qrator_domain" "example" {
+  client_id         = var.client_id
+  name              = "example.com"
+  maintenance_until = 1775520000 # enable until 2026-04-07T00:00:00Z
+}
+```
+
+```terraform
+resource "qrator_service" "example" {
+  client_id         = var.client_id
+  name              = "my-service"
+  ips               = ["192.0.2.1"]
+  maintenance_until = 1775520000
+}
+```
+
+To disable maintenance mode, remove the attribute or set it explicitly to `null`:
+
+```terraform
+resource "qrator_domain" "example" {
+  client_id         = var.client_id
+  name              = "example.com"
+  maintenance_until = null
+}
+```
+
+---
+
 ## Dependency order
 
 Terraform resolves dependencies automatically via references (`qrator_domain.example.id`, etc.). The recommended resource creation order for a domain is:
