@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"sort"
 	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -211,6 +214,7 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	sortIPEntries(entries)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 
@@ -239,13 +243,11 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
-	var stateEntries []IPListEntryModel
-	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("entries"), &stateEntries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), stateEntries, &resp.Diagnostics)
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), &resp.Diagnostics)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries", err.Error())
 		return
@@ -301,6 +303,7 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
+	sortIPEntries(entries)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 
@@ -423,10 +426,34 @@ func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, desire
 }
 
 // ---------------------------------------------------------------------------
-// readAndReconcile — read API entries, reconcile with current state
+// sortIPEntries sorts entries numerically by IP address.
+func sortIPEntries(entries []IPListEntryModel) {
+	type pair struct {
+		model  IPListEntryModel
+		parsed net.IP
+	}
+	pairs := make([]pair, len(entries))
+	for i, e := range entries {
+		pairs[i].model = e
+		if ip := net.ParseIP(e.IP.ValueString()); ip != nil {
+			pairs[i].parsed = ip.To16()
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].parsed == nil || pairs[j].parsed == nil {
+			return pairs[i].model.IP.ValueString() < pairs[j].model.IP.ValueString()
+		}
+		return bytes.Compare(pairs[i].parsed, pairs[j].parsed) < 0
+	})
+	for i, p := range pairs {
+		entries[i] = p.model
+	}
+}
+
+// readAndReconcile — read API entries and return them sorted by IP.
 // ---------------------------------------------------------------------------
 
-func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, stateEntries []IPListEntryModel, diags *diag.Diagnostics) ([]IPListEntryModel, error) {
+func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, diags *diag.Diagnostics) ([]IPListEntryModel, error) {
 	apiPath := r.entity.apiPath(entityID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodGet(), []interface{}{"tuple"})
@@ -441,35 +468,10 @@ func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, s
 		return nil, fmt.Errorf("failed to parse %s response: %w", r.kind.methodGet(), err)
 	}
 
-	// Index API entries by IP.
-	apiByIP := make(map[string]IPListEntryModel, len(apiEntries))
-	for _, e := range apiEntries {
-		apiByIP[e.IP.ValueString()] = e
-	}
+	sortIPEntries(apiEntries)
 
-	// Reconcile: preserve state ordering for entries that still exist in API,
-	// update their values from API. Append any new API entries at the end.
-	seen := make(map[string]bool, len(apiByIP))
-	entries := make([]IPListEntryModel, 0, len(apiByIP))
-
-	for _, se := range stateEntries {
-		ip := se.IP.ValueString()
-		if ae, ok := apiByIP[ip]; ok {
-			entries = append(entries, ae)
-			seen[ip] = true
-		}
-		// Entry removed from API → drop from state (drift detected).
-	}
-
-	// New entries in API not in current state.
-	for ip, ae := range apiByIP {
-		if !seen[ip] {
-			entries = append(entries, ae)
-		}
-	}
-
-	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d entries (API: %d)", r.entity, entityID, r.kind, len(entries), len(apiEntries)))
-	return entries, nil
+	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d entries", r.entity, entityID, r.kind, len(apiEntries)))
+	return apiEntries, nil
 }
 
 // ---------------------------------------------------------------------------
