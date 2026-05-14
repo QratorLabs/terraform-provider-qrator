@@ -89,7 +89,9 @@ func (p *QratorProvider) Configure(ctx context.Context, req provider.ConfigureRe
 }
 
 func (p *QratorProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewCDNIPsDataSource,
+	}
 }
 
 func (p *QratorProvider) Resources(ctx context.Context) []func() resource.Resource {
