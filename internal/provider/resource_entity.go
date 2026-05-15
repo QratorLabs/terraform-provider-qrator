@@ -242,20 +242,16 @@ func (r *EntityResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 	}
 
-	// Store ID immediately so state is not lost if subsequent reads fail.
+	// Set state from known values — no need to re-read from API after create.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.Int64Value(entityID))...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("client_id"), clientID)...)
-
-	// Read back from API and set state.
-	r.readAndSetState(ctx, entityID, &resp.State, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), name)...)
+	if !planUntil.IsNull() && !planUntil.IsUnknown() {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("maintenance_until"), planUntil)...)
+	} else {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Null())...)
 	}
 
-	// Preserve client_id in state (readAndSetState does not set it).
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("client_id"), clientID)...)
-
-	// For service: set IPs and override status (API may return "pending" during transition).
 	if r.entity == entityService {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("ips"), ips)...)
 		statusVal := "online"
