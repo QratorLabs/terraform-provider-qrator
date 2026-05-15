@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -436,21 +437,26 @@ func (r *EntityResource) readAndSetState(ctx context.Context, entityID int64, st
 		return
 	}
 
-	// Read maintenance mode.
+	// Read maintenance mode. Skip if the entity is offline — the API rejects the call in that case.
 	mmRaw, err := r.client.MakeRequest(ctx, apiPath, "maintenance_mode_get", nil)
 	if err != nil {
-		diags.AddError("Failed to read maintenance mode", fmt.Sprintf("maintenance_mode_get failed: %s", err))
-		return
-	}
-	var mm maintenanceModeResult
-	if err := json.Unmarshal(mmRaw, &mm); err != nil {
-		diags.AddError("Failed to parse maintenance mode", err.Error())
-		return
-	}
-	if mm.Until != nil {
-		diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Value(*mm.Until))...)
+		if strings.Contains(err.Error(), "Offline service") {
+			diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Null())...)
+		} else {
+			diags.AddError("Failed to read maintenance mode", fmt.Sprintf("maintenance_mode_get failed: %s", err))
+			return
+		}
 	} else {
-		diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Null())...)
+		var mm maintenanceModeResult
+		if err := json.Unmarshal(mmRaw, &mm); err != nil {
+			diags.AddError("Failed to parse maintenance mode", err.Error())
+			return
+		}
+		if mm.Until != nil {
+			diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Value(*mm.Until))...)
+		} else {
+			diags.Append(state.SetAttribute(ctx, path.Root("maintenance_until"), types.Int64Null())...)
+		}
 	}
 
 	// For service: read status. If API returns a transient value like "pending",
