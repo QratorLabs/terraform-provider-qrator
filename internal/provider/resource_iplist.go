@@ -1,12 +1,9 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"sort"
 	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -214,7 +211,6 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	sortIPEntries(entries)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 
@@ -243,11 +239,13 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var stateEntries []IPListEntryModel
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("entries"), &stateEntries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), &resp.Diagnostics)
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), stateEntries, &resp.Diagnostics)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries", err.Error())
 		return
@@ -303,7 +301,6 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	sortIPEntries(entries)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 
@@ -425,35 +422,10 @@ func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, desire
 	}
 }
 
-// ---------------------------------------------------------------------------
-// sortIPEntries sorts entries numerically by IP address.
-func sortIPEntries(entries []IPListEntryModel) {
-	type pair struct {
-		model  IPListEntryModel
-		parsed net.IP
-	}
-	pairs := make([]pair, len(entries))
-	for i, e := range entries {
-		pairs[i].model = e
-		if ip := net.ParseIP(e.IP.ValueString()); ip != nil {
-			pairs[i].parsed = ip.To16()
-		}
-	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i].parsed == nil || pairs[j].parsed == nil {
-			return pairs[i].model.IP.ValueString() < pairs[j].model.IP.ValueString()
-		}
-		return bytes.Compare(pairs[i].parsed, pairs[j].parsed) < 0
-	})
-	for i, p := range pairs {
-		entries[i] = p.model
-	}
-}
-
-// readAndReconcile — read API entries and return them sorted by IP.
+// readAndReconcile — read API entries and reorder to match state order.
 // ---------------------------------------------------------------------------
 
-func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, diags *diag.Diagnostics) ([]IPListEntryModel, error) {
+func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, stateEntries []IPListEntryModel, diags *diag.Diagnostics) ([]IPListEntryModel, error) {
 	apiPath := r.entity.apiPath(entityID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodGet(), []interface{}{"tuple"})
@@ -468,11 +440,11 @@ func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, d
 		return nil, fmt.Errorf("failed to parse %s response: %w", r.kind.methodGet(), err)
 	}
 
-	sortIPEntries(apiEntries)
-
-	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d entries", r.entity, entityID, r.kind, len(apiEntries)))
-	return apiEntries, nil
+	result := reorderByPlanOrder(stateEntries, apiEntries, func(e *IPListEntryModel) string { return e.IP.ValueString() })
+	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d entries (API: %d)", r.entity, entityID, r.kind, len(result), len(apiEntries)))
+	return result, nil
 }
+
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -531,3 +503,4 @@ func ipEntryEqual(a, b *IPListEntryModel) bool {
 		a.TTL.ValueInt64() == b.TTL.ValueInt64() &&
 		a.Comment.ValueString() == b.Comment.ValueString()
 }
+

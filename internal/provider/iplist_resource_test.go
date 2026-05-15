@@ -163,20 +163,24 @@ func TestIPListSyncEntries(t *testing.T) {
 func TestIPListReadAndReconcile(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("sorts by IP regardless of API order", func(t *testing.T) {
+	t.Run("preserves state order, updates values from API", func(t *testing.T) {
 		apiPath := "/request/domain/20"
 		mc := newMockClient().OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
-			{"10.0.0.2", int64(0), ""},
-			{"10.0.0.10", int64(0), ""},
-			{"10.0.0.1", int64(0), ""},
+			{"10.0.0.2", int64(0), "b"},
+			{"10.0.0.1", int64(0), "a"},
 		}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
+		state := []IPListEntryModel{
+			{IP: types.StringValue("10.0.0.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+			{IP: types.StringValue("10.0.0.2"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+		}
 		var d diag.Diagnostics
-		got, err := r.readAndReconcile(ctx, 20, &d)
+		got, err := r.readAndReconcile(ctx, 20, state, &d)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"10.0.0.1", "10.0.0.2", "10.0.0.10"}
+		// State order preserved; API comment values used.
+		want := []string{"10.0.0.1", "10.0.0.2"}
 		if len(got) != len(want) {
 			t.Fatalf("expected %d entries, got %d", len(want), len(got))
 		}
@@ -185,16 +189,23 @@ func TestIPListReadAndReconcile(t *testing.T) {
 				t.Errorf("pos %d: expected %s, got %s", i, ip, got[i].IP.ValueString())
 			}
 		}
+		if got[0].Comment.ValueString() != "a" || got[1].Comment.ValueString() != "b" {
+			t.Errorf("expected comments [a b], got [%s %s]", got[0].Comment.ValueString(), got[1].Comment.ValueString())
+		}
 	})
 
-	t.Run("entry removed from API is dropped from result", func(t *testing.T) {
+	t.Run("entry removed from API is dropped", func(t *testing.T) {
 		apiPath := "/request/domain/21"
 		mc := newMockClient().OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
 			{"1.1.1.1", int64(0), ""},
 		}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
+		state := []IPListEntryModel{
+			{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+			{IP: types.StringValue("2.2.2.2"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+		}
 		var d diag.Diagnostics
-		got, err := r.readAndReconcile(ctx, 21, &d)
+		got, err := r.readAndReconcile(ctx, 21, state, &d)
 		if err != nil || len(got) != 1 {
 			t.Fatalf("got len=%d, err=%v", len(got), err)
 		}
@@ -203,20 +214,29 @@ func TestIPListReadAndReconcile(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple entries returned sorted", func(t *testing.T) {
+	t.Run("new API entry appended after existing state entries", func(t *testing.T) {
 		apiPath := "/request/domain/22"
 		mc := newMockClient().OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
-			{"3.3.3.3", int64(0), "new"},
 			{"1.1.1.1", int64(0), ""},
+			{"2.2.2.2", int64(0), "new"},
+			{"3.3.3.3", int64(0), ""},
 		}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
+		// State has 1.1.1.1 and 3.3.3.3; 2.2.2.2 is new from API — appended at end.
+		state := []IPListEntryModel{
+			{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+			{IP: types.StringValue("3.3.3.3"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+		}
 		var d diag.Diagnostics
-		got, err := r.readAndReconcile(ctx, 22, &d)
-		if err != nil || len(got) != 2 {
+		got, err := r.readAndReconcile(ctx, 22, state, &d)
+		if err != nil || len(got) != 3 {
 			t.Fatalf("got len=%d, err=%v", len(got), err)
 		}
-		if got[0].IP.ValueString() != "1.1.1.1" || got[1].IP.ValueString() != "3.3.3.3" {
-			t.Errorf("expected sorted [1.1.1.1 3.3.3.3], got %v", got)
+		want := []string{"1.1.1.1", "3.3.3.3", "2.2.2.2"}
+		for i, ip := range want {
+			if got[i].IP.ValueString() != ip {
+				t.Errorf("pos %d: expected %s, got %s", i, ip, got[i].IP.ValueString())
+			}
 		}
 	})
 
@@ -225,7 +245,7 @@ func TestIPListReadAndReconcile(t *testing.T) {
 		mc := newMockClient().OnError(apiPath, "whitelist_get", fmt.Errorf("timeout"))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
 		var d diag.Diagnostics
-		_, err := r.readAndReconcile(ctx, 23, &d)
+		_, err := r.readAndReconcile(ctx, 23, nil, &d)
 		if err == nil {
 			t.Error("expected error")
 		}
