@@ -211,6 +211,12 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read entries after create", err.Error())
+		return
+	}
+
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
 
@@ -298,6 +304,12 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	r.syncEntries(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read entries after update", err.Error())
 		return
 	}
 
