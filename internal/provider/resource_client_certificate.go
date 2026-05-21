@@ -21,6 +21,8 @@ import (
 const (
 	CertTypeUpload      = "upload"
 	CertTypeLetsEncrypt = "letsencrypt"
+
+	leMaxHostnames = 12
 )
 
 type ClientCertificateResource struct {
@@ -47,6 +49,7 @@ var defaultRetryConfig = retryConfig{
 
 type ClientCertificateResourceModel struct {
 	ID             types.Int64  `tfsdk:"id"`
+	RequestID      types.Int64  `tfsdk:"request_id"`
 	ClientID       types.Int64  `tfsdk:"client_id"`
 	Type           types.String `tfsdk:"type"`
 	NotValidBefore types.Int64  `tfsdk:"not_valid_before"`
@@ -101,7 +104,9 @@ type linkDetails struct {
 }
 
 type requestDetails struct {
-	ID     int64 `json:"id"`
+	ID     int64    `json:"id"`
+	Status string   `json:"status"`
+	Errors []string `json:"errors"`
 	Result struct {
 		Chains []struct {
 			ChainKey string `json:"chain_key"`
@@ -125,6 +130,11 @@ func (r *ClientCertificateResource) Schema(ctx context.Context, req resource.Sch
 			"id": schema.Int64Attribute{
 				Description: "The unique identifier of the certificate.",
 				Computed:    true,
+			},
+			"request_id": schema.Int64Attribute{
+				Description: "The ID of the certificate request (certrequest_upload or certrequest_le). Stored to allow cleanup on delete.",
+				Computed:    true,
+				Optional:    true,
 			},
 			"client_id": schema.Int64Attribute{
 				Description: "The ID of the client owning the certificate.",
@@ -247,7 +257,7 @@ func (r *ClientCertificateResource) Create(ctx context.Context, req resource.Cre
 	}
 
 	var originalCerts []CertDetailModel
-	if !plan.Certificates.IsNull() {
+	if !plan.Certificates.IsNull() && !plan.Certificates.IsUnknown() {
 		d := plan.Certificates.ElementsAs(ctx, &originalCerts, false)
 		resp.Diagnostics.Append(d...)
 		if resp.Diagnostics.HasError() {
@@ -305,10 +315,15 @@ func (r *ClientCertificateResource) Read(ctx context.Context, req resource.ReadR
 		}
 	}
 
+	// Preserve request_id — it comes from Create and is not returned by certificate_get.
+	requestID := state.RequestID
+
 	r.mapCertificateToModel(ctx, cert, &state, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	state.RequestID = requestID
 
 	if len(existingCerts) > 0 {
 		state.Certificates = restoreSensitiveCertificates(ctx, existingCerts, state.Certificates, &resp.Diagnostics)
@@ -336,6 +351,7 @@ func (r *ClientCertificateResource) Delete(ctx context.Context, req resource.Del
 	}
 
 	path := fmt.Sprintf("/request/client/%d", state.ClientID.ValueInt64())
+
 	_, err := r.client.MakeRequest(ctx, path, "certificate_remove", []int64{state.ID.ValueInt64()})
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -343,6 +359,18 @@ func (r *ClientCertificateResource) Delete(ctx context.Context, req resource.Del
 			fmt.Sprintf("Failed to delete certificate (ID: %d): %v", state.ID.ValueInt64(), err),
 		)
 		return
+	}
+
+	// Remove the certrequest if we have its ID (not available after import).
+	if !state.RequestID.IsNull() && !state.RequestID.IsUnknown() {
+		_, err := r.client.MakeRequest(ctx, path, "certrequest_remove", []int64{state.RequestID.ValueInt64()})
+		if err != nil {
+			// Log but don't fail — the certificate itself is already removed.
+			tflog.Warn(ctx, "Failed to remove certificate request", map[string]interface{}{
+				"request_id": state.RequestID.ValueInt64(),
+				"error":      err.Error(),
+			})
+		}
 	}
 }
 
@@ -377,6 +405,7 @@ func (r *ClientCertificateResource) ImportState(ctx context.Context, req resourc
 
 	var state ClientCertificateResourceModel
 	state.ClientID = types.Int64Value(clientID)
+	state.RequestID = types.Int64Null() // not available after import
 	r.mapCertificateToModel(ctx, cert, &state, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -427,9 +456,90 @@ func (r *ClientCertificateResource) validatePlan(ctx context.Context, plan *Clie
 		if len(hostnames) == 0 {
 			return fmt.Errorf("at least one hostname must be provided for 'letsencrypt' type")
 		}
+		if len(hostnames) > leMaxHostnames {
+			return fmt.Errorf("letsencrypt certificates support at most %d hostnames, got %d", leMaxHostnames, len(hostnames))
+		}
 	}
 
 	return nil
+}
+
+// waitForCertRequest polls certrequest_get until status == "done", then returns the first chain's key and ID.
+// It respects context cancellation so that Ctrl+C during terraform apply is handled promptly.
+func (r *ClientCertificateResource) waitForCertRequest(
+	ctx context.Context,
+	path string,
+	requestID int64,
+	initialDelay, retryDelay time.Duration,
+	maxRetries int,
+) (chainKey string, chainID int64, err error) {
+	sleep := func(d time.Duration) error {
+		select {
+		case <-time.After(d):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if err := sleep(initialDelay); err != nil {
+		return "", 0, err
+	}
+
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			if err := sleep(retryDelay); err != nil {
+				return "", 0, err
+			}
+		}
+
+		detail, err := r.getRequestDetails(ctx, path, requestID)
+		if err != nil {
+			tflog.Info(ctx, fmt.Sprintf("certrequest poll %d/%d: error fetching details: %v", i+1, maxRetries, err))
+			continue
+		}
+
+		tflog.Debug(ctx, fmt.Sprintf("certrequest poll %d/%d: status=%q", i+1, maxRetries, detail.Status))
+
+		if detail.Status != "done" {
+			continue
+		}
+
+		if len(detail.Errors) > 0 {
+			return "", 0, fmt.Errorf("certificate request failed: %v", detail.Errors)
+		}
+		if len(detail.Result.Chains) == 0 {
+			return "", 0, fmt.Errorf("certificate request completed but returned no chains")
+		}
+
+		return detail.Result.Chains[0].ChainKey, detail.Result.Chains[0].ChainID, nil
+	}
+
+	return "", 0, fmt.Errorf("timed out waiting for certificate request %d to complete", requestID)
+}
+
+// installCertRequest calls certrequest_install and returns the resulting certificate ID.
+func (r *ClientCertificateResource) installCertRequest(ctx context.Context, path string, requestID int64, chainKey string, chainID int64) (int64, error) {
+	installResult, err := r.client.MakeRequest(ctx, path, "certrequest_install", []interface{}{
+		requestID,
+		chainKey,
+		chainID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("certrequest_install: %w", err)
+	}
+
+	tflog.Debug(ctx, "certrequest_install response", map[string]interface{}{
+		"raw": string(installResult),
+	})
+
+	// API returns a plain number.
+	var certificateID int64
+	if err := json.Unmarshal(installResult, &certificateID); err != nil {
+		return 0, fmt.Errorf("failed to parse certrequest_install response: %w", err)
+	}
+
+	return certificateID, nil
 }
 
 func (r *ClientCertificateResource) handleUploadCertificate(ctx context.Context, path string, plan *ClientCertificateResourceModel, diags *diag.Diagnostics) {
@@ -445,11 +555,10 @@ func (r *ClientCertificateResource) handleUploadCertificate(ctx context.Context,
 		"cert_type": certDetails[0].Type.ValueString(),
 	})
 
-	params := []string{
+	result, err := r.client.MakeRequest(ctx, path, "certrequest_upload", []string{
 		certDetails[0].Cert.ValueString(),
 		certDetails[0].Key.ValueString(),
-	}
-	result, err := r.client.MakeRequest(ctx, path, "certrequest_upload", params)
+	})
 	if err != nil {
 		diags.AddError("API Error", fmt.Sprintf("Failed to create upload request: %v", err))
 		return
@@ -463,65 +572,25 @@ func (r *ClientCertificateResource) handleUploadCertificate(ctx context.Context,
 		return
 	}
 
-	var chainKey string
-	var chainID int64
-	for i := 0; i < defaultRetryConfig.UploadMaxRetries; i++ {
-		time.Sleep(defaultRetryConfig.UploadInitialDelay)
-		if i > 0 {
-			time.Sleep(defaultRetryConfig.UploadRetryDelay)
-		}
-
-		detail, err := r.getRequestDetails(ctx, path, uploadResponse.ID)
-		if err != nil {
-			tflog.Info(ctx, fmt.Sprintf("Retry %d: failed to get request details: %v", i+1, err))
-			continue
-		}
-
-		if len(detail.Result.Chains) > 0 {
-			chainKey = detail.Result.Chains[0].ChainKey
-			chainID = detail.Result.Chains[0].ChainID
-			break
-		}
-	}
-
-	if chainKey == "" {
-		diags.AddError("Timeout Error", "Failed to get chain_key after retries")
+	requestID := uploadResponse.ID
+	chainKey, chainID, err := r.waitForCertRequest(
+		ctx, path, requestID,
+		defaultRetryConfig.UploadInitialDelay,
+		defaultRetryConfig.UploadRetryDelay,
+		defaultRetryConfig.UploadMaxRetries,
+	)
+	if err != nil {
+		diags.AddError("Certificate Request Error", fmt.Sprintf("Upload request (ID: %d) failed: %v", requestID, err))
 		return
 	}
 
-	installParams := []interface{}{
-		uploadResponse.ID,
-		chainKey,
-		chainID,
-	}
-	installResult, err := r.client.MakeRequest(ctx, path, "certrequest_install", installParams)
+	certificateID, err := r.installCertRequest(ctx, path, requestID, chainKey, chainID)
 	if err != nil {
 		diags.AddError("API Error", fmt.Sprintf("Failed to install certificate: %v", err))
 		return
 	}
 
-	tflog.Debug(ctx, "Install certificate response", map[string]interface{}{
-		"raw_response": string(installResult),
-	})
-
-	var certificateID int64
-	if err := json.Unmarshal(installResult, &certificateID); err == nil {
-		tflog.Debug(ctx, "Parsed certificate ID from direct number", map[string]interface{}{
-			"certificate_id": certificateID,
-		})
-	} else {
-		var idResponse struct {
-			CertificateID int64 `json:"result"`
-		}
-		if err := json.Unmarshal(installResult, &idResponse); err != nil {
-			diags.AddError("Parse Error", fmt.Sprintf("Failed to parse install response (tried both formats): %v", err))
-			return
-		}
-		certificateID = idResponse.CertificateID
-		tflog.Debug(ctx, "Parsed certificate ID from struct", map[string]interface{}{
-			"certificate_id": certificateID,
-		})
-	}
+	plan.RequestID = types.Int64Value(requestID)
 
 	cert, err := r.getCertificateDetails(ctx, path, certificateID)
 	if err != nil {
@@ -542,76 +611,50 @@ func (r *ClientCertificateResource) handleLetsEncryptCertificate(ctx context.Con
 		}
 	}
 
-	params := []interface{}{
+	result, err := r.client.MakeRequest(ctx, path, "certrequest_le", []interface{}{
 		plan.DomainID.ValueInt64(),
 		hostnames,
-	}
-	result, err := r.client.MakeRequest(ctx, path, "certrequest_le", params)
+	})
 	if err != nil {
 		diags.AddError("API Error", fmt.Sprintf("Failed to create Let's Encrypt request: %v", err))
 		return
 	}
 
 	var leResponse struct {
-		ID        int64    `json:"id"`
-		Hostnames []string `json:"hostnames"`
+		ID int64 `json:"id"`
 	}
 	if err := json.Unmarshal(result, &leResponse); err != nil {
 		diags.AddError("Parse Error", fmt.Sprintf("Failed to parse Let's Encrypt response: %v", err))
 		return
 	}
 
-	var certificate *certificateDetails
-	for i := 0; i < defaultRetryConfig.LetsEncryptMaxRetries; i++ {
-		time.Sleep(defaultRetryConfig.LetsEncryptInitialDelay)
-		if i > 0 {
-			time.Sleep(defaultRetryConfig.LetsEncryptRetryDelay)
-		}
-
-		cert, err := r.findLECertificate(ctx, path, leResponse.Hostnames)
-		if err != nil {
-			tflog.Info(ctx, fmt.Sprintf("Retry %d: failed to find Let's Encrypt certificate: %v", i+1, err))
-			continue
-		}
-
-		if cert != nil {
-			certificate = cert
-			break
-		}
-	}
-
-	if certificate == nil {
-		diags.AddError("Timeout Error", "Failed to find issued Let's Encrypt certificate after retries")
+	requestID := leResponse.ID
+	chainKey, chainID, err := r.waitForCertRequest(
+		ctx, path, requestID,
+		defaultRetryConfig.LetsEncryptInitialDelay,
+		defaultRetryConfig.LetsEncryptRetryDelay,
+		defaultRetryConfig.LetsEncryptMaxRetries,
+	)
+	if err != nil {
+		diags.AddError("Certificate Request Error", fmt.Sprintf("Let's Encrypt request (ID: %d) failed: %v", requestID, err))
 		return
 	}
 
-	fullCert, err := r.getCertificateDetails(ctx, path, certificate.ID)
+	certificateID, err := r.installCertRequest(ctx, path, requestID, chainKey, chainID)
 	if err != nil {
-		diags.AddError("API Error", fmt.Sprintf("Failed to get certificate details (ID: %d): %v", certificate.ID, err))
+		diags.AddError("API Error", fmt.Sprintf("Failed to install Let's Encrypt certificate: %v", err))
 		return
 	}
 
-	r.mapCertificateToModel(ctx, fullCert, plan, diags)
-}
+	plan.RequestID = types.Int64Value(requestID)
 
-func (r *ClientCertificateResource) findLECertificate(ctx context.Context, path string, expectedHostnames []string) (*certificateDetails, error) {
-	result, err := r.client.MakeRequest(ctx, path, "certificate_list", nil)
+	cert, err := r.getCertificateDetails(ctx, path, certificateID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list certificates: %w", err)
+		diags.AddError("API Error", fmt.Sprintf("Failed to get certificate details (ID: %d): %v", certificateID, err))
+		return
 	}
 
-	var certs []certificateDetails
-	if err := json.Unmarshal(result, &certs); err != nil {
-		return nil, fmt.Errorf("failed to parse certificates list: %w", err)
-	}
-
-	for _, cert := range certs {
-		if cert.Type == "letsencrypt" && stringSlicesEqual(cert.Hostnames, expectedHostnames) {
-			return &cert, nil
-		}
-	}
-
-	return nil, nil
+	r.mapCertificateToModel(ctx, cert, plan, diags)
 }
 
 func (r *ClientCertificateResource) getRequestDetails(ctx context.Context, path string, requestID int64) (*requestDetails, error) {
