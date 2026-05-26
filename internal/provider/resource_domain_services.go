@@ -82,8 +82,10 @@ type apiTCPProxyUpstream struct {
 }
 
 type apiWebSocketUpstream struct {
-	SSL       bool                `json:"ssl"`
-	Upstreams []apiUpstreamServer `json:"upstreams"`
+	SSL             bool                `json:"ssl"`
+	SNIName         *string             `json:"sniName,omitempty"`
+	SNINameOverride *bool               `json:"sniNameOverride,omitempty"`
+	Upstreams       []apiUpstreamServer `json:"upstreams"`
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +345,16 @@ func websocketServiceSchemaAttrs() map[string]schema.Attribute {
 		},
 		"upstream_ssl": schema.BoolAttribute{
 			Description: "Enable SSL/TLS for upstream connections.",
+			Optional:    true,
+			Computed:    true,
+		},
+		"upstream_sni_name": schema.StringAttribute{
+			Description: "SNI hostname for upstream TLS connections.",
+			Optional:    true,
+			Computed:    true,
+		},
+		"upstream_sni_override": schema.BoolAttribute{
+			Description: "Force use of sni_name as HOST header in upstream request.",
 			Optional:    true,
 			Computed:    true,
 		},
@@ -1103,6 +1115,16 @@ func apiToWSModel(e *apiServiceEntry) DomainServiceWSModel {
 		var u apiWebSocketUpstream
 		if err := json.Unmarshal(*e.Upstream, &u); err == nil {
 			m.UpstreamSSL = types.BoolValue(u.SSL)
+			if u.SNIName != nil {
+				m.UpstreamSNIName = types.StringValue(*u.SNIName)
+			} else {
+				m.UpstreamSNIName = types.StringNull()
+			}
+			if u.SNINameOverride != nil {
+				m.UpstreamSNIOverride = types.BoolValue(*u.SNINameOverride)
+			} else {
+				m.UpstreamSNIOverride = types.BoolNull()
+			}
 			m.Upstreams = upstreamServersFromAPI(u.Upstreams)
 		}
 	}
@@ -1212,6 +1234,14 @@ func websocketModelToAPI(m *DomainServiceWSModel) apiServiceEntry {
 	u := apiWebSocketUpstream{
 		SSL:       m.UpstreamSSL.ValueBool(),
 		Upstreams: upstreamServersToAPI(m.Upstreams),
+	}
+	if !m.UpstreamSNIName.IsNull() && !m.UpstreamSNIName.IsUnknown() {
+		s := m.UpstreamSNIName.ValueString()
+		u.SNIName = &s
+	}
+	if !m.UpstreamSNIOverride.IsNull() && !m.UpstreamSNIOverride.IsUnknown() {
+		b := m.UpstreamSNIOverride.ValueBool()
+		u.SNINameOverride = &b
 	}
 	raw, _ := json.Marshal(u)
 	rawMsg := json.RawMessage(raw)

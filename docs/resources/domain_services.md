@@ -119,9 +119,11 @@ resource "qrator_domain_services" "full" {
 
   websocket = [
     {
-      port         = 443
-      ssl          = true
-      upstream_ssl = true
+      port                 = 443
+      ssl                  = true
+      upstream_ssl         = true
+      upstream_sni_name    = "backend.internal"
+      upstream_sni_override = false
       upstreams = [
         { ip = "10.0.0.5", port = 8443, weight = 100, type = "primary" }
       ]
@@ -242,6 +244,8 @@ Optional/Computed:
 - `ssl` (Boolean) Enable SSL/TLS on the frontend. API default: `false`.
 - `default_drop` (Boolean) If true, only whitelisted IPs can access the service. API default: `false`.
 - `upstream_ssl` (Boolean) Enable SSL/TLS for upstream connections. API default: `false`.
+- `upstream_sni_name` (String) SNI hostname for upstream TLS connections.
+- `upstream_sni_override` (Boolean) Force use of `sni_name` as HOST header in upstream requests. API default: `false`.
 
 Read-Only:
 

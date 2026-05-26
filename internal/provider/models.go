@@ -121,12 +121,14 @@ type DomainServiceTCPProxyModel struct {
 
 // DomainServiceWSModel represents a websocket service entry.
 type DomainServiceWSModel struct {
-	ID          types.Int64                 `tfsdk:"id"`
-	Port        types.Int64                 `tfsdk:"port"`
-	SSL         types.Bool                  `tfsdk:"ssl"`
-	DefaultDrop types.Bool                  `tfsdk:"default_drop"`
-	UpstreamSSL types.Bool                  `tfsdk:"upstream_ssl"`
-	Upstreams   []DomainUpstreamServerModel `tfsdk:"upstreams"`
+	ID                  types.Int64                 `tfsdk:"id"`
+	Port                types.Int64                 `tfsdk:"port"`
+	SSL                 types.Bool                  `tfsdk:"ssl"`
+	DefaultDrop         types.Bool                  `tfsdk:"default_drop"`
+	UpstreamSSL         types.Bool                  `tfsdk:"upstream_ssl"`
+	UpstreamSNIName     types.String                `tfsdk:"upstream_sni_name"`
+	UpstreamSNIOverride types.Bool                  `tfsdk:"upstream_sni_override"`
+	Upstreams           []DomainUpstreamServerModel `tfsdk:"upstreams"`
 }
 
 // DomainUpstreamServerModel represents a single upstream server.
