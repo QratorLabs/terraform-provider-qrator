@@ -187,17 +187,24 @@ func (r *SNIResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReq
 		return
 	}
 
-	idByHost := make(map[string]types.Int64, len(stateEntries))
-	for _, e := range stateEntries {
-		if !e.LinkID.IsNull() && !e.LinkID.IsUnknown() {
-			idByHost[sniHostKey(&e)] = e.LinkID
+	stateByHost := make(map[string]*SNIEntryModel, len(stateEntries))
+	for i := range stateEntries {
+		if !stateEntries[i].LinkID.IsNull() && !stateEntries[i].LinkID.IsUnknown() {
+			stateByHost[sniHostKey(&stateEntries[i])] = &stateEntries[i]
 		}
 	}
 
 	changed := false
 	for i := range planEntries {
-		if id, ok := idByHost[sniHostKey(&planEntries[i])]; ok {
-			planEntries[i].LinkID = id
+		se, ok := stateByHost[sniHostKey(&planEntries[i])]
+		if !ok {
+			continue
+		}
+		// Only preserve link_id when the certificate is unchanged.
+		// sni_link_add on an existing host creates a new link with a new link_id,
+		// so we must not promise the old link_id in the plan.
+		if planEntries[i].Certificate.Equal(se.Certificate) {
+			planEntries[i].LinkID = se.LinkID
 			changed = true
 		}
 	}
