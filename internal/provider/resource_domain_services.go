@@ -55,11 +55,11 @@ type apiServiceEntry struct {
 
 type apiUpstreamServer struct {
 	IP        *string `json:"ip,omitempty"`
-	DNSRecord *string `json:"dns_record,omitempty"`
+	DNSRecord *string `json:"dns_record"`
 	Port      int64   `json:"port"`
 	Weight    int64   `json:"weight"`
 	Type      string  `json:"type"`
-	Name      string  `json:"name,omitempty"`
+	Name      string  `json:"name"`
 }
 
 type apiHTTPUpstream struct {
@@ -67,7 +67,7 @@ type apiHTTPUpstream struct {
 	Weights         bool                `json:"weights"`
 	Backups         bool                `json:"backups"`
 	SSL             bool                `json:"ssl"`
-	SNIName         *string             `json:"sniName,omitempty"`
+	SNIName         *string             `json:"sniName"`
 	SNINameOverride *bool               `json:"sniNameOverride,omitempty"`
 	Upstreams       []apiUpstreamServer `json:"upstreams"`
 }
@@ -83,7 +83,7 @@ type apiTCPProxyUpstream struct {
 
 type apiWebSocketUpstream struct {
 	SSL             bool                `json:"ssl"`
-	SNIName         *string             `json:"sniName,omitempty"`
+	SNIName         *string             `json:"sniName"`
 	SNINameOverride *bool               `json:"sniNameOverride,omitempty"`
 	Upstreams       []apiUpstreamServer `json:"upstreams"`
 }

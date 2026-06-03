@@ -42,7 +42,7 @@ func NewServiceServicesResource() resource.Resource {
 
 type apiServiceHTTPUpstream struct {
 	SSL             bool    `json:"ssl"`
-	SNIName         *string `json:"sniName,omitempty"`
+	SNIName         *string `json:"sniName"`
 	SNINameOverride *bool   `json:"sniNameOverride,omitempty"`
 }
 
