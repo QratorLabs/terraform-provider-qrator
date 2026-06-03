@@ -67,7 +67,7 @@ func TestDomainServicesUpdate_NewServiceLowerID(t *testing.T) {
 			SSL: boolPtrHelper(true), HTTP2: boolPtrHelper(true), DefaultDrop: boolPtrHelper(false),
 			Upstream: rawMsg(apiHTTPUpstream{
 				Balancer: "roundrobin",
-				Upstreams: []apiUpstreamServer{
+				Upstreams: []apiHTTPWSUpstreamItem{
 					{IP: strPtr("34.34.9.77"), Port: 443, Weight: 100, Type: "primary", Name: "infra-prod-ingress:443"},
 				},
 			}),
@@ -77,7 +77,7 @@ func TestDomainServicesUpdate_NewServiceLowerID(t *testing.T) {
 			SSL: boolPtrHelper(false), HTTP2: boolPtrHelper(false), DefaultDrop: boolPtrHelper(false),
 			Upstream: rawMsg(apiHTTPUpstream{
 				Balancer: "roundrobin",
-				Upstreams: []apiUpstreamServer{
+				Upstreams: []apiHTTPWSUpstreamItem{
 					{IP: strPtr("34.34.9.77"), Port: 80, Weight: 100, Type: "primary", Name: "infra-prod-ingress:80"},
 				},
 			}),

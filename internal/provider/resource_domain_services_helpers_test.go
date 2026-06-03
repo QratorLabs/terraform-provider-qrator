@@ -324,8 +324,8 @@ func TestBuildServiceList_Empty(t *testing.T) {
 
 func TestApiToServicesModel_SortsByID(t *testing.T) {
 	entries := []apiServiceEntry{
-		{ID: int64Ptr(200), Type: "http", Port: int64Ptr(443), Upstream: rawMsg(apiHTTPUpstream{Balancer: "roundrobin", Upstreams: []apiUpstreamServer{}})},
-		{ID: int64Ptr(100), Type: "http", Port: int64Ptr(80), Upstream: rawMsg(apiHTTPUpstream{Balancer: "roundrobin", Upstreams: []apiUpstreamServer{}})},
+		{ID: int64Ptr(200), Type: "http", Port: int64Ptr(443), Upstream: rawMsg(apiHTTPUpstream{Balancer: "roundrobin", Upstreams: []apiHTTPWSUpstreamItem{}})},
+		{ID: int64Ptr(100), Type: "http", Port: int64Ptr(80), Upstream: rawMsg(apiHTTPUpstream{Balancer: "roundrobin", Upstreams: []apiHTTPWSUpstreamItem{}})},
 	}
 
 	m := &DomainServicesResourceModel{}
@@ -424,8 +424,8 @@ func TestUpstreamServersRoundTrip(t *testing.T) {
 		},
 	}
 
-	api := upstreamServersToAPI(models)
-	back := upstreamServersFromAPI(api)
+	api := httpWSUpstreamsToAPI(models)
+	back := httpWSUpstreamsFromAPI(api)
 
 	if len(back) != 2 {
 		t.Fatalf("round-trip returned %d servers, want 2", len(back))
@@ -457,11 +457,11 @@ func TestUpstreamServersRoundTrip(t *testing.T) {
 
 func TestApiToServicesModel_AllTypes(t *testing.T) {
 	entries := []apiServiceEntry{
-		{ID: int64Ptr(1), Type: "http", Port: int64Ptr(80), Upstream: rawMsg(apiHTTPUpstream{Balancer: "roundrobin", Upstreams: []apiUpstreamServer{}})},
+		{ID: int64Ptr(1), Type: "http", Port: int64Ptr(80), Upstream: rawMsg(apiHTTPUpstream{Balancer: "roundrobin", Upstreams: []apiHTTPWSUpstreamItem{}})},
 		{ID: int64Ptr(2), Type: "nat", Port: int64Ptr(53), Proto: "udp", Upstream: rawMsg(apiNATUpstream{IP: "1.1.1.1", Port: 53})},
 		{ID: int64Ptr(3), Type: "nat-all", Proto: "tcp", Upstream: rawMsg("2.2.2.2")},
-		{ID: int64Ptr(4), Type: "tcpproxy", Port: int64Ptr(3306), Upstream: rawMsg(apiTCPProxyUpstream{Upstreams: []apiUpstreamServer{}})},
-		{ID: int64Ptr(5), Type: "websocket", Port: int64Ptr(8443), Upstream: rawMsg(apiWebSocketUpstream{SSL: true, Upstreams: []apiUpstreamServer{}})},
+		{ID: int64Ptr(4), Type: "tcpproxy", Port: int64Ptr(3306), Upstream: rawMsg(apiTCPProxyUpstream{Upstreams: []apiTCPProxyUpstreamItem{}})},
+		{ID: int64Ptr(5), Type: "websocket", Port: int64Ptr(8443), Upstream: rawMsg(apiWebSocketUpstream{SSL: true, Upstreams: []apiHTTPWSUpstreamItem{}})},
 	}
 
 	m := &DomainServicesResourceModel{}

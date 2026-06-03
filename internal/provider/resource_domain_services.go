@@ -53,23 +53,37 @@ type apiServiceEntry struct {
 	Upstream      *json.RawMessage `json:"upstream,omitempty"`
 }
 
-type apiUpstreamServer struct {
-	IP        *string `json:"ip,omitempty"`
-	DNSRecord *string `json:"dns_record"`
-	Port      int64   `json:"port"`
-	Weight    int64   `json:"weight"`
+// apiHTTPWSUpstreamItem is used for HTTP and WebSocket upstream items.
+// Both ip and dns_record are always serialized (one as value, one as null)
+// because the API schema uses additionalProperties:false with oneOf validation.
+type apiHTTPWSUpstreamItem struct {
 	Type      string  `json:"type"`
+	IP        *string `json:"ip"`
+	DNSRecord *string `json:"dns_record"`
+	Weight    int64   `json:"weight"`
 	Name      string  `json:"name"`
+	Port      int64   `json:"port"`
+}
+
+// apiTCPProxyUpstreamItem is used for TCP proxy upstream items.
+// The schema has no dns_record field and additionalProperties:false,
+// so dns_record must never be sent.
+type apiTCPProxyUpstreamItem struct {
+	Type   string `json:"type"`
+	IP     string `json:"ip"`
+	Weight int64  `json:"weight"`
+	Name   string `json:"name"`
+	Port   int64  `json:"port"`
 }
 
 type apiHTTPUpstream struct {
-	Balancer        string              `json:"balancer"`
-	Weights         bool                `json:"weights"`
-	Backups         bool                `json:"backups"`
-	SSL             bool                `json:"ssl"`
-	SNIName         *string             `json:"sniName"`
-	SNINameOverride *bool               `json:"sniNameOverride,omitempty"`
-	Upstreams       []apiUpstreamServer `json:"upstreams"`
+	Balancer        string                  `json:"balancer"`
+	Weights         bool                    `json:"weights"`
+	Backups         bool                    `json:"backups"`
+	SSL             bool                    `json:"ssl"`
+	SNIName         *string                 `json:"sniName"`
+	SNINameOverride *bool                   `json:"sniNameOverride,omitempty"`
+	Upstreams       []apiHTTPWSUpstreamItem `json:"upstreams"`
 }
 
 type apiNATUpstream struct {
@@ -78,14 +92,14 @@ type apiNATUpstream struct {
 }
 
 type apiTCPProxyUpstream struct {
-	Upstreams []apiUpstreamServer `json:"upstreams"`
+	Upstreams []apiTCPProxyUpstreamItem `json:"upstreams"`
 }
 
 type apiWebSocketUpstream struct {
-	SSL             bool                `json:"ssl"`
-	SNIName         *string             `json:"sniName"`
-	SNINameOverride *bool               `json:"sniNameOverride,omitempty"`
-	Upstreams       []apiUpstreamServer `json:"upstreams"`
+	SSL             bool                    `json:"ssl"`
+	SNIName         *string                 `json:"sniName"`
+	SNINameOverride *bool                   `json:"sniNameOverride,omitempty"`
+	Upstreams       []apiHTTPWSUpstreamItem `json:"upstreams"`
 }
 
 // ---------------------------------------------------------------------------
@@ -1036,7 +1050,7 @@ func apiToHTTPModel(e *apiServiceEntry) DomainServiceHTTPModel {
 			} else {
 				m.UpstreamSNIOverride = types.BoolNull()
 			}
-			m.Upstreams = upstreamServersFromAPI(u.Upstreams)
+			m.Upstreams = httpWSUpstreamsFromAPI(u.Upstreams)
 		}
 	}
 
@@ -1096,7 +1110,7 @@ func apiToTCPProxyModel(e *apiServiceEntry) DomainServiceTCPProxyModel {
 	if e.Upstream != nil {
 		var u apiTCPProxyUpstream
 		if err := json.Unmarshal(*e.Upstream, &u); err == nil {
-			m.Upstreams = upstreamServersFromAPI(u.Upstreams)
+			m.Upstreams = tcpProxyUpstreamsFromAPI(u.Upstreams)
 		}
 	}
 
@@ -1125,7 +1139,7 @@ func apiToWSModel(e *apiServiceEntry) DomainServiceWSModel {
 			} else {
 				m.UpstreamSNIOverride = types.BoolNull()
 			}
-			m.Upstreams = upstreamServersFromAPI(u.Upstreams)
+			m.Upstreams = httpWSUpstreamsFromAPI(u.Upstreams)
 		}
 	}
 
@@ -1149,7 +1163,7 @@ func httpModelToAPI(m *DomainServiceHTTPModel) apiServiceEntry {
 		Weights:   m.UpstreamWeights.ValueBool(),
 		Backups:   m.UpstreamBackups.ValueBool(),
 		SSL:       m.UpstreamSSL.ValueBool(),
-		Upstreams: upstreamServersToAPI(m.Upstreams),
+		Upstreams: httpWSUpstreamsToAPI(m.Upstreams),
 	}
 	if !m.UpstreamSNIName.IsNull() && !m.UpstreamSNIName.IsUnknown() {
 		s := m.UpstreamSNIName.ValueString()
@@ -1216,7 +1230,7 @@ func tcpproxyModelToAPI(m *DomainServiceTCPProxyModel) apiServiceEntry {
 	}
 
 	u := apiTCPProxyUpstream{
-		Upstreams: upstreamServersToAPI(m.Upstreams),
+		Upstreams: tcpProxyUpstreamsToAPI(m.Upstreams),
 	}
 	raw, _ := json.Marshal(u)
 	rawMsg := json.RawMessage(raw)
@@ -1233,7 +1247,7 @@ func websocketModelToAPI(m *DomainServiceWSModel) apiServiceEntry {
 
 	u := apiWebSocketUpstream{
 		SSL:       m.UpstreamSSL.ValueBool(),
-		Upstreams: upstreamServersToAPI(m.Upstreams),
+		Upstreams: httpWSUpstreamsToAPI(m.Upstreams),
 	}
 	if !m.UpstreamSNIName.IsNull() && !m.UpstreamSNIName.IsUnknown() {
 		s := m.UpstreamSNIName.ValueString()
@@ -1253,33 +1267,58 @@ func websocketModelToAPI(m *DomainServiceWSModel) apiServiceEntry {
 // Helpers: upstream server conversion
 // ---------------------------------------------------------------------------
 
-func upstreamServersToAPI(models []DomainUpstreamServerModel) []apiUpstreamServer {
-	servers := make([]apiUpstreamServer, len(models))
+// httpWSUpstreamsToAPI converts models to HTTP/WebSocket upstream items.
+// Both ip and dns_record are always present (one as value, one as null).
+func httpWSUpstreamsToAPI(models []DomainUpstreamServerModel) []apiHTTPWSUpstreamItem {
+	items := make([]apiHTTPWSUpstreamItem, len(models))
 	for i, m := range models {
-		s := apiUpstreamServer{
+		item := apiHTTPWSUpstreamItem{
 			Port:   m.Port.ValueInt64(),
 			Weight: m.Weight.ValueInt64(),
 			Type:   m.Type.ValueString(),
 		}
 		if !m.IP.IsNull() && !m.IP.IsUnknown() {
-			ip := m.IP.ValueString()
-			s.IP = &ip
+			s := m.IP.ValueString()
+			item.IP = &s
 		}
+		// else item.IP = nil → "ip": null
 		if !m.DNSRecord.IsNull() && !m.DNSRecord.IsUnknown() {
-			dns := m.DNSRecord.ValueString()
-			s.DNSRecord = &dns
+			s := m.DNSRecord.ValueString()
+			item.DNSRecord = &s
 		}
+		// else item.DNSRecord = nil → "dns_record": null
 		if !m.Name.IsNull() && !m.Name.IsUnknown() {
-			s.Name = m.Name.ValueString()
+			item.Name = m.Name.ValueString()
 		}
-		servers[i] = s
+		// else item.Name = "" → "name": ""
+		items[i] = item
 	}
-	return servers
+	return items
 }
 
-func upstreamServersFromAPI(servers []apiUpstreamServer) []DomainUpstreamServerModel {
-	models := make([]DomainUpstreamServerModel, len(servers))
-	for i, s := range servers {
+// tcpProxyUpstreamsToAPI converts models to TCP proxy upstream items.
+// No dns_record field — the schema forbids it (additionalProperties: false).
+func tcpProxyUpstreamsToAPI(models []DomainUpstreamServerModel) []apiTCPProxyUpstreamItem {
+	items := make([]apiTCPProxyUpstreamItem, len(models))
+	for i, m := range models {
+		item := apiTCPProxyUpstreamItem{
+			IP:     m.IP.ValueString(),
+			Port:   m.Port.ValueInt64(),
+			Weight: m.Weight.ValueInt64(),
+			Type:   m.Type.ValueString(),
+		}
+		if !m.Name.IsNull() && !m.Name.IsUnknown() {
+			item.Name = m.Name.ValueString()
+		}
+		items[i] = item
+	}
+	return items
+}
+
+// httpWSUpstreamsFromAPI converts HTTP/WebSocket upstream items from the API to models.
+func httpWSUpstreamsFromAPI(items []apiHTTPWSUpstreamItem) []DomainUpstreamServerModel {
+	models := make([]DomainUpstreamServerModel, len(items))
+	for i, s := range items {
 		m := DomainUpstreamServerModel{
 			Port:   types.Int64Value(s.Port),
 			Weight: types.Int64Value(s.Weight),
@@ -1297,6 +1336,22 @@ func upstreamServersFromAPI(servers []apiUpstreamServer) []DomainUpstreamServerM
 			m.DNSRecord = types.StringNull()
 		}
 		models[i] = m
+	}
+	return models
+}
+
+// tcpProxyUpstreamsFromAPI converts TCP proxy upstream items from the API to models.
+func tcpProxyUpstreamsFromAPI(items []apiTCPProxyUpstreamItem) []DomainUpstreamServerModel {
+	models := make([]DomainUpstreamServerModel, len(items))
+	for i, s := range items {
+		models[i] = DomainUpstreamServerModel{
+			IP:        types.StringValue(s.IP),
+			DNSRecord: types.StringNull(), // TCP proxy has no dns_record
+			Port:      types.Int64Value(s.Port),
+			Weight:    types.Int64Value(s.Weight),
+			Type:      types.StringValue(s.Type),
+			Name:      types.StringValue(s.Name),
+		}
 	}
 	return models
 }
