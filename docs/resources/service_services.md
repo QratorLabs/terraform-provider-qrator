@@ -9,9 +9,9 @@ description: |-
 
 Manages the service list for a service in Qrator. Supports DNS, HTTP, ICMP, NAT, any-ingress-egress, proto-ingress-egress, tcp-ingress-egress, tcp-egress, and frag-ingress-egress service types.
 
-The API works on a bulk/replace basis: `services_set` accepts the entire list at once. There are no individual add/remove operations — the provider reads the current list, applies changes, and writes the full list back.
+Each apply replaces the entire service list.
 
-~> **Note:** Deleting this resource clears the service list (does not remove the service).
+~> **Note:** Deleting this resource clears the service list.
 
 ## Example Usage
 

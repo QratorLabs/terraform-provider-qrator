@@ -9,9 +9,9 @@ description: |-
 
 Manages the service list for a domain in Qrator. Supports HTTP, NAT, NAT-all, TCP proxy, and WebSocket service types.
 
-The API works on a bulk/replace basis: `services_set` accepts the entire list at once. There are no individual add/remove operations — the provider reads the current list, applies changes, and writes the full list back.
+Each apply replaces the entire service list.
 
-~> **Note:** Deleting this resource clears the service list (does not remove the domain).
+~> **Note:** Deleting this resource clears the service list.
 
 ## Example Usage
 

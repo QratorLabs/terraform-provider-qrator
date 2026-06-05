@@ -11,9 +11,9 @@ Manages HTTP redirect rules for a domain in Qrator.
 
 Rules are evaluated in order. Matching is based on the incoming port, hostname, and URI path. A rule with a `null` redirect target disables matching and blocks less-specific (later) rules from firing — useful for carve-outs.
 
-The API works on a bulk/replace basis: `redirect_set` writes the entire list at once. The provider preserves the order from the configuration.
+Rule order is significant — rules are evaluated from first to last, and the first matching rule applies.
 
-~> **Note:** Deleting this resource clears all redirect rules (`redirect_set([])`). It does not remove the domain.
+~> **Note:** Deleting this resource clears all redirect rules.
 
 ## Example Usage
 
@@ -173,5 +173,5 @@ Optional:
 - Maximum 70 redirect rules.
 - `from.hostname.value` is required and must be non-empty when `from.hostname.type` is `"fqdn"`.
 - Each `from` matcher must be unique (port + hostname type/value + URI type/value).
-- Per port, at most one rule may have `from.hostname.type = "any"` (the API constraint *"only one 'any' per port"*).
-- Per port, at most one rule may have `from.uri = null` (the API constraint *"only one 'default' per port"*).
+- Per port, at most one rule may have `from.hostname.type = "any"`.
+- Per port, at most one rule may have `from.uri = null`.

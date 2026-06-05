@@ -9,9 +9,9 @@ description: |-
 
 Manages the whitelist for a service in Qrator. The whitelist contains IP addresses that are always allowed to access the service.
 
-Updates are incremental: the provider reads the current list from the API, computes the diff with the desired state, then uses `whitelist_remove` and `whitelist_append` to apply only the necessary changes.
+Updates are incremental: only added and removed entries are applied.
 
-~> **Note:** Deleting this resource flushes the entire whitelist via `whitelist_flush`.
+~> **Note:** Deleting this resource clears the entire whitelist.
 
 ## Example Usage
 

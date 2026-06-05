@@ -7,7 +7,7 @@ description: |-
 
 # qrator_domain (Resource)
 
-Manages a domain in Qrator — creates it via `domain_create`, manages its name.
+Manages a domain in Qrator — name and maintenance mode.
 
 ~> **Note:** Deleting this resource is a no-op — the domain itself is not removed.
 

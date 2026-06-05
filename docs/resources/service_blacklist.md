@@ -9,9 +9,9 @@ description: |-
 
 Manages the blacklist for a service in Qrator. The blacklist contains IP addresses that are always blocked from accessing the service.
 
-Updates are incremental: the provider reads the current list from the API, computes the diff with the desired state, then uses `blacklist_remove` and `blacklist_append` to apply only the necessary changes.
+Updates are incremental: only added and removed entries are applied.
 
-~> **Note:** Deleting this resource flushes the entire blacklist via `blacklist_flush`.
+~> **Note:** Deleting this resource clears the entire blacklist.
 
 ## Example Usage
 

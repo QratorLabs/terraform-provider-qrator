@@ -7,7 +7,7 @@ description: |-
 
 # qrator_service (Resource)
 
-Manages a service in Qrator — creates it via `service_create`, manages its name, status, and upstream IP addresses.
+Manages a service in Qrator — name, status, and upstream IP addresses.
 
 ~> **Note:** Deleting this resource is a no-op — the service itself is not removed.
 

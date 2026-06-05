@@ -9,9 +9,9 @@ description: |-
 
 Manages SNI configuration for a service in Qrator. Provides hostname-to-certificate mappings.
 
-Updates are incremental: the provider computes the diff between desired and current state, then uses `sni_link_add` and `sni_link_remove` to apply changes individually.
+Updates are incremental: only added and removed entries are applied, existing unchanged entries are left untouched.
 
-~> **Note:** Deleting this resource clears all SNI links via `sni_clear`.
+~> **Note:** Deleting this resource clears all SNI links.
 
 ## Example Usage
 
