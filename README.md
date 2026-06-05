@@ -49,6 +49,7 @@ export QRATOR_ENDPOINT="https://api.qrator.net"
 | `qrator_domain` | Domain management (name, maintenance mode) |
 | `qrator_domain_services` | Domain service list (HTTP, NAT, NAT-all, TCP proxy, WebSocket) |
 | `qrator_domain_sni` | Domain SNI hostname-to-certificate mappings |
+| `qrator_domain_redirects` | Domain HTTP redirect rules (port, hostname, URI matching) |
 | `qrator_domain_whitelist` | Domain IP whitelist (allowed addresses) |
 | `qrator_domain_blacklist` | Domain IP blacklist (blocked addresses) |
 

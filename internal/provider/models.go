@@ -141,6 +141,51 @@ type DomainUpstreamServerModel struct {
 	Name      types.String `tfsdk:"name"`
 }
 
+// ---------------------------------------------------------------------------
+// Domain redirects models
+// ---------------------------------------------------------------------------
+
+// DomainRedirectsResourceModel is the Terraform model for qrator_domain_redirects.
+type DomainRedirectsResourceModel struct {
+	DomainID  types.Int64           `tfsdk:"domain_id"`
+	Redirects []DomainRedirectModel `tfsdk:"redirects"`
+}
+
+// DomainRedirectModel is a single redirect rule.
+type DomainRedirectModel struct {
+	From     DomainRedirectFromModel    `tfsdk:"from"`
+	Redirect *DomainRedirectTargetModel `tfsdk:"redirect"` // nil = null (disabled)
+}
+
+// DomainRedirectFromModel is the "from" request matcher.
+type DomainRedirectFromModel struct {
+	Port     types.Int64                 `tfsdk:"port"`
+	Hostname DomainRedirectHostnameModel `tfsdk:"hostname"`
+	URI      *DomainRedirectURIModel     `tfsdk:"uri"` // nil = null (any URI)
+}
+
+// DomainRedirectHostnameModel is the hostname matcher within "from".
+type DomainRedirectHostnameModel struct {
+	Type  types.String `tfsdk:"type"`
+	Value types.String `tfsdk:"value"` // null when type="any"
+}
+
+// DomainRedirectURIModel is the URI path matcher within "from".
+type DomainRedirectURIModel struct {
+	Type  types.String `tfsdk:"type"`
+	Value types.String `tfsdk:"value"`
+}
+
+// DomainRedirectTargetModel is the redirect destination.
+type DomainRedirectTargetModel struct {
+	Code     types.Int64  `tfsdk:"code"`
+	Schema   types.String `tfsdk:"schema"`   // null = keep request schema
+	Hostname types.String `tfsdk:"hostname"` // null = keep request hostname
+	Port     types.Int64  `tfsdk:"port"`
+	Path     types.String `tfsdk:"path"` // null = keep request path
+	Args     types.Bool   `tfsdk:"args"`
+}
+
 // IPListEntryModel defines a single IP entry (whitelist or blacklist).
 type IPListEntryModel struct {
 	IP      types.String `tfsdk:"ip"`
