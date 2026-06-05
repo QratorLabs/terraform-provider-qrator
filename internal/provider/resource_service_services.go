@@ -1084,22 +1084,21 @@ func apiToSvcServicesModel(entries []apiServiceEntry, m *ServiceServicesResource
 	sortByID(m.FragIngressEgress, func(e *ServiceFragIEModel) int64 { return e.ID.ValueInt64() })
 }
 
-func svcKeyDNS(port int64) string              { return fmt.Sprintf("dns:%d", port) }
-func svcKeyHTTP(port int64) string             { return fmt.Sprintf("http:%d", port) }
-func svcKeyICMP() string                       { return "icmp" }
+func svcKeyDNS(port int64) string               { return fmt.Sprintf("dns:%d", port) }
+func svcKeyHTTP(port int64) string              { return fmt.Sprintf("http:%d", port) }
+func svcKeyICMP() string                        { return "icmp" }
 func svcKeyNAT(proto string, port int64) string { return fmt.Sprintf("nat:%s:%d", proto, port) }
-func svcKeyAnyIE() string                      { return "any-ingress-egress" }
-func svcKeyProtoIE(proto int64) string         { return fmt.Sprintf("proto-ie:%d", proto) }
-func svcKeyTCPIE() string                      { return "tcp-ingress-egress" }
-func svcKeyTCPE() string                       { return "tcp-egress" }
-func svcKeyFragIE() string                     { return "frag-ingress-egress" }
+func svcKeyAnyIE() string                       { return "any-ingress-egress" }
+func svcKeyProtoIE(proto int64) string          { return fmt.Sprintf("proto-ie:%d", proto) }
+func svcKeyTCPIE() string                       { return "tcp-ingress-egress" }
+func svcKeyTCPE() string                        { return "tcp-egress" }
+func svcKeyFragIE() string                      { return "frag-ingress-egress" }
 
 func sortByID[T any](s []T, id func(*T) int64) {
 	sort.SliceStable(s, func(i, j int) bool {
 		return id(&s[i]) < id(&s[j])
 	})
 }
-
 
 func apiToSvcDNSModel(e *apiServiceEntry) ServiceDNSModel {
 	return ServiceDNSModel{

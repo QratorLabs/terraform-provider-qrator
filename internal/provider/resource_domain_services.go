@@ -738,7 +738,9 @@ func (r *DomainServicesResource) Create(ctx context.Context, req resource.Create
 
 	// On first apply IDs were unknown so plan kept config order; reorder state to match.
 	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *DomainServiceHTTPModel) string { return compositeKeyHTTP(e.Port.ValueInt64()) })
-	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *DomainServiceNATModel) string { return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *DomainServiceNATModel) string {
+		return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64())
+	})
 	plan.NATAll = reorderByPlanOrder(planNATAll, plan.NATAll, func(e *DomainServiceNATAllModel) string { return compositeKeyNATAll(e.Proto.ValueString()) })
 	plan.TCPProxy = reorderByPlanOrder(planTCPProxy, plan.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
 	plan.WebSocket = reorderByPlanOrder(planWS, plan.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
@@ -769,7 +771,9 @@ func (r *DomainServicesResource) Read(ctx context.Context, req resource.ReadRequ
 	}
 
 	state.HTTP = reorderByPlanOrder(prevHTTP, state.HTTP, func(e *DomainServiceHTTPModel) string { return compositeKeyHTTP(e.Port.ValueInt64()) })
-	state.NAT = reorderByPlanOrder(prevNAT, state.NAT, func(e *DomainServiceNATModel) string { return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	state.NAT = reorderByPlanOrder(prevNAT, state.NAT, func(e *DomainServiceNATModel) string {
+		return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64())
+	})
 	state.NATAll = reorderByPlanOrder(prevNATAll, state.NATAll, func(e *DomainServiceNATAllModel) string { return compositeKeyNATAll(e.Proto.ValueString()) })
 	state.TCPProxy = reorderByPlanOrder(prevTCPProxy, state.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
 	state.WebSocket = reorderByPlanOrder(prevWS, state.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })
@@ -810,7 +814,9 @@ func (r *DomainServicesResource) Update(ctx context.Context, req resource.Update
 	}
 
 	plan.HTTP = reorderByPlanOrder(planHTTP, plan.HTTP, func(e *DomainServiceHTTPModel) string { return compositeKeyHTTP(e.Port.ValueInt64()) })
-	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *DomainServiceNATModel) string { return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64()) })
+	plan.NAT = reorderByPlanOrder(planNAT, plan.NAT, func(e *DomainServiceNATModel) string {
+		return compositeKeyNAT(e.Proto.ValueString(), e.Port.ValueInt64())
+	})
 	plan.NATAll = reorderByPlanOrder(planNATAll, plan.NATAll, func(e *DomainServiceNATAllModel) string { return compositeKeyNATAll(e.Proto.ValueString()) })
 	plan.TCPProxy = reorderByPlanOrder(planTCPProxy, plan.TCPProxy, func(e *DomainServiceTCPProxyModel) string { return compositeKeyTCPProxy(e.Port.ValueInt64()) })
 	plan.WebSocket = reorderByPlanOrder(planWS, plan.WebSocket, func(e *DomainServiceWSModel) string { return compositeKeyWebSocket(e.Port.ValueInt64()) })

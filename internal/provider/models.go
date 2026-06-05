@@ -8,9 +8,9 @@ import (
 type CDNModel struct {
 	DomainID types.Int64 `tfsdk:"domain_id"`
 
-	AccessControlAllowOrigin types.List  `tfsdk:"access_control_allow_origin"`
+	AccessControlAllowOrigin types.List   `tfsdk:"access_control_allow_origin"`
 	CacheControl             types.String `tfsdk:"cache_control"`
-	RedirectCode             types.Int64 `tfsdk:"redirect_code"`
+	RedirectCode             types.Int64  `tfsdk:"redirect_code"`
 
 	CacheIgnoreParams types.Bool   `tfsdk:"cache_ignore_params"`
 	ClientHeaders     types.List   `tfsdk:"client_headers"`

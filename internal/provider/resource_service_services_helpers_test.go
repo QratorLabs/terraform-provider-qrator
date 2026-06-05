@@ -245,11 +245,11 @@ func TestSortByID(t *testing.T) {
 
 func TestBuildSvcServiceList_AllTypes(t *testing.T) {
 	m := &ServiceServicesResourceModel{
-		ServiceID: types.Int64Value(1),
-		DNS:       []ServiceDNSModel{{Port: types.Int64Value(53), DefaultDrop: types.BoolNull()}},
-		HTTP:      []ServiceHTTPModel{{Port: types.Int64Value(80), SSL: types.BoolValue(false), HTTP2: types.BoolValue(false), DefaultDrop: types.BoolNull(), Upstream: &ServiceHTTPUpstreamModel{SSL: types.BoolValue(false), SNIName: types.StringNull(), SNIOverride: types.BoolValue(false)}}},
-		ICMP:      []ServiceICMPModel{{DefaultDrop: types.BoolNull(), RateLimit: types.Int64Null()}},
-		NAT:       []ServiceNATModel{{Port: types.Int64Value(25), Proto: types.StringValue("tcp"), DefaultDrop: types.BoolNull(), DropAmp: types.BoolNull(), RateLimit: types.Int64Null()}},
+		ServiceID:          types.Int64Value(1),
+		DNS:                []ServiceDNSModel{{Port: types.Int64Value(53), DefaultDrop: types.BoolNull()}},
+		HTTP:               []ServiceHTTPModel{{Port: types.Int64Value(80), SSL: types.BoolValue(false), HTTP2: types.BoolValue(false), DefaultDrop: types.BoolNull(), Upstream: &ServiceHTTPUpstreamModel{SSL: types.BoolValue(false), SNIName: types.StringNull(), SNIOverride: types.BoolValue(false)}}},
+		ICMP:               []ServiceICMPModel{{DefaultDrop: types.BoolNull(), RateLimit: types.Int64Null()}},
+		NAT:                []ServiceNATModel{{Port: types.Int64Value(25), Proto: types.StringValue("tcp"), DefaultDrop: types.BoolNull(), DropAmp: types.BoolNull(), RateLimit: types.Int64Null()}},
 		AnyIngressEgress:   []ServiceAnyIEModel{{DefaultDrop: types.BoolNull(), DropAmp: types.BoolNull(), RateLimit: types.Int64Null()}},
 		ProtoIngressEgress: []ServiceProtoIEModel{{Proto: types.Int64Value(17), DefaultDrop: types.BoolNull(), DropAmp: types.BoolNull(), RateLimit: types.Int64Null()}},
 		TCPIngressEgress:   []ServiceTCPIEModel{{DefaultDrop: types.BoolNull()}},

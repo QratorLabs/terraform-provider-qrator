@@ -462,8 +462,8 @@ func (r *SNIResource) updateSNI(ctx context.Context, apiPath string, plan, state
 	}
 
 	// Compute diff.
-	var toRemove []int64       // link_ids to remove
-	var toAdd []SNIEntryModel  // entries to add/overwrite
+	var toRemove []int64      // link_ids to remove
+	var toAdd []SNIEntryModel // entries to add/overwrite
 
 	// Entries in state but not in plan → remove.
 	for key, se := range stateByHost {

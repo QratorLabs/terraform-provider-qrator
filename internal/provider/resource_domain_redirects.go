@@ -62,7 +62,7 @@ type apiRedirectURI struct {
 type apiRedirectTarget struct {
 	Code     int64   `json:"code"`
 	Schema   *string `json:"schema,omitempty"` // optional; omit to keep the same schema
-	Hostname *string `json:"hostname"`          // null = preserve request hostname; no omitempty
+	Hostname *string `json:"hostname"`         // null = preserve request hostname; no omitempty
 	Port     int64   `json:"port"`
 	Path     *string `json:"path"` // null = preserve request path; no omitempty
 	Args     bool    `json:"args"`
@@ -229,8 +229,8 @@ func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resour
 	// Per-port counters for API constraints:
 	//   "only one 'any' per port"     — at most one hostname.type="any" rule per port
 	//   "only one 'default' per port" — at most one uri=null rule per port
-	anyHostnamePerPort := make(map[int64]int)  // port → count of hostname=any rules
-	defaultURIPerPort := make(map[int64]int)   // port → count of uri=null rules
+	anyHostnamePerPort := make(map[int64]int) // port → count of hostname=any rules
+	defaultURIPerPort := make(map[int64]int)  // port → count of uri=null rules
 	seen := make(map[string]bool, len(model.Redirects))
 
 	for i := range model.Redirects {

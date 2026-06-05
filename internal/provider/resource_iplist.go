@@ -457,7 +457,6 @@ func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, s
 	return result, nil
 }
 
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -515,4 +514,3 @@ func ipEntryEqual(a, b *IPListEntryModel) bool {
 		a.TTL.ValueInt64() == b.TTL.ValueInt64() &&
 		a.Comment.ValueString() == b.Comment.ValueString()
 }
-

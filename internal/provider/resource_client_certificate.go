@@ -18,6 +18,22 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
+// certDetailAttrTypes is the attr.Type map for CertDetailModel objects.
+var certDetailAttrTypes = map[string]attr.Type{
+	"type": types.StringType,
+	"cert": types.StringType,
+	"key":  types.StringType,
+}
+
+// certLinkAttrTypes is the attr.Type map for CertLinkModel objects.
+var certLinkAttrTypes = map[string]attr.Type{
+	"link_id":     types.Int64Type,
+	"port":        types.Int64Type,
+	"hostname":    types.StringType,
+	"domain_id":   types.Int64Type,
+	"certificate": types.Int64Type,
+}
+
 const (
 	CertTypeUpload      = "upload"
 	CertTypeLetsEncrypt = "letsencrypt"
@@ -749,11 +765,7 @@ func restoreSensitiveCertificates(ctx context.Context, originalCerts []CertDetai
 		d := currentCerts.ElementsAs(ctx, &newCerts, false)
 		diags.Append(d...)
 		if diags.HasError() {
-			return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-				"type": types.StringType,
-				"cert": types.StringType,
-				"key":  types.StringType,
-			}})
+			return types.ListNull(types.ObjectType{AttrTypes: certDetailAttrTypes})
 		}
 	}
 
@@ -780,27 +792,15 @@ func toStringList(values []string, diags *diag.Diagnostics) types.List {
 func toCertificateList(ctx context.Context, certs []CertDetailModel, diags *diag.Diagnostics) types.List {
 	elems := make([]attr.Value, len(certs))
 	for i, c := range certs {
-		obj, d := types.ObjectValueFrom(ctx, map[string]attr.Type{
-			"type": types.StringType,
-			"cert": types.StringType,
-			"key":  types.StringType,
-		}, c)
+		obj, d := types.ObjectValueFrom(ctx, certDetailAttrTypes, c)
 		diags.Append(d...)
 		if diags.HasError() {
-			return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-				"type": types.StringType,
-				"cert": types.StringType,
-				"key":  types.StringType,
-			}})
+			return types.ListNull(types.ObjectType{AttrTypes: certDetailAttrTypes})
 		}
 		elems[i] = obj
 	}
 
-	list, d := types.ListValue(types.ObjectType{AttrTypes: map[string]attr.Type{
-		"type": types.StringType,
-		"cert": types.StringType,
-		"key":  types.StringType,
-	}}, elems)
+	list, d := types.ListValue(types.ObjectType{AttrTypes: certDetailAttrTypes}, elems)
 	diags.Append(d...)
 	return list
 }
@@ -820,45 +820,16 @@ func toLinkList(ctx context.Context, links []linkDetails, diags *diag.Diagnostic
 			link.Hostname = types.StringNull()
 		}
 
-		obj, d := types.ObjectValueFrom(ctx, map[string]attr.Type{
-			"link_id":     types.Int64Type,
-			"port":        types.Int64Type,
-			"hostname":    types.StringType,
-			"domain_id":   types.Int64Type,
-			"certificate": types.Int64Type,
-		}, link)
+		obj, d := types.ObjectValueFrom(ctx, certLinkAttrTypes, link)
 		diags.Append(d...)
 		if diags.HasError() {
-			return types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-				"link_id":     types.Int64Type,
-				"port":        types.Int64Type,
-				"hostname":    types.StringType,
-				"domain_id":   types.Int64Type,
-				"certificate": types.Int64Type,
-			}})
+			return types.ListNull(types.ObjectType{AttrTypes: certLinkAttrTypes})
 		}
 		elems[i] = obj
 	}
 
-	list, d := types.ListValue(types.ObjectType{AttrTypes: map[string]attr.Type{
-		"link_id":     types.Int64Type,
-		"port":        types.Int64Type,
-		"hostname":    types.StringType,
-		"domain_id":   types.Int64Type,
-		"certificate": types.Int64Type,
-	}}, elems)
+	list, d := types.ListValue(types.ObjectType{AttrTypes: certLinkAttrTypes}, elems)
 	diags.Append(d...)
 	return list
 }
 
-func stringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
-}

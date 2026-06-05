@@ -812,10 +812,6 @@ func cacheErrorModelsToList(ctx context.Context, models []CDNCacheErrorEntryMode
 	return list
 }
 
-// cacheErrorEntriesToList converts API cache error entries to a Terraform List value.
-func cacheErrorEntriesToList(ctx context.Context, entries []cdnCacheErrorEntry, diags *diag.Diagnostics) types.List {
-	return cacheErrorModelsToList(ctx, cacheErrorEntriesToModels(entries), diags)
-}
 
 // cdnBlockedURIEntry represents the API structure for a CDN blocked URI entry.
 type cdnBlockedURIEntry struct {
@@ -905,10 +901,6 @@ func blockedURIModelsToList(ctx context.Context, models []CDNBlockedURIEntryMode
 	return list
 }
 
-// blockedURIEntriesToList converts API blocked URI entries to a Terraform List value.
-func blockedURIEntriesToList(ctx context.Context, entries []cdnBlockedURIEntry, diags *diag.Diagnostics) types.List {
-	return blockedURIModelsToList(ctx, blockedURIEntriesToModels(entries), diags)
-}
 
 // parseCacheControl converts the API response for cache_control_get into a
 // normalised string for the Terraform state: "cdn", "origin", or a numeric
