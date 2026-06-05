@@ -3,22 +3,17 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func newTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *QratorClient) {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-
-	c := NewQratorClient("test-api-key", srv.URL, false)
-	c.retryDelay = 1 * time.Millisecond // fast retries in tests
-	return srv, c
+	return srv, NewQratorClient("test-api-key", srv.URL, false)
 }
 
 func TestMakeRequest_Success(t *testing.T) {
@@ -90,33 +85,23 @@ func TestMakeRequest_APIErrorWithDetails(t *testing.T) {
 	}
 }
 
-func TestMakeRequest_HTTP500Retries(t *testing.T) {
+func TestMakeRequest_HTTP500ReturnsError(t *testing.T) {
 	attempts := 0
 	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		attempts++
-		if attempts <= 2 {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("status code: 500"))
-			return
-		}
-		var req APIRequest
-		json.NewDecoder(r.Body).Decode(&req)
-		resp := APIResponse{Result: json.RawMessage(`"recovered"`), ID: req.ID}
-		json.NewEncoder(w).Encode(resp)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal server error"))
 	})
 
-	result, err := c.MakeRequest(context.Background(), "/test", "test_method", nil)
-	if err != nil {
-		t.Fatalf("expected success after retries, got: %v", err)
+	_, err := c.MakeRequest(context.Background(), "/test", "test_method", nil)
+	if err == nil {
+		t.Fatal("expected error on HTTP 500, got nil")
 	}
-
-	var s string
-	json.Unmarshal(result, &s)
-	if s != "recovered" {
-		t.Errorf("result = %q, want recovered", s)
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error = %q, should contain '500'", err.Error())
 	}
-	if attempts != 3 {
-		t.Errorf("attempts = %d, want 3", attempts)
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (no retries)", attempts)
 	}
 }
 
@@ -197,39 +182,6 @@ func TestMakeRequest_MethodAndParams(t *testing.T) {
 	}
 	if string(gotParams) != "null" {
 		t.Errorf("params = %s, want null", string(gotParams))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// shouldRetry
-// ---------------------------------------------------------------------------
-
-func TestShouldRetry(t *testing.T) {
-	c := &QratorClient{}
-
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"connection refused", fmt.Errorf("connection refused"), true},
-		{"timeout", fmt.Errorf("request timeout"), true},
-		{"status code 429", fmt.Errorf("unexpected status code: 429"), true},
-		{"status code 500", fmt.Errorf("unexpected status code: 500, body: error"), true},
-		{"status code 502", fmt.Errorf("unexpected status code: 502, body: error"), true},
-		{"API error", fmt.Errorf("API error: bad request"), false},
-		{"random error", fmt.Errorf("something else"), false},
-		{"network error", fmt.Errorf("network unreachable"), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := c.shouldRetry(tt.err)
-			if got != tt.want {
-				t.Errorf("shouldRetry(%v) = %v, want %v", tt.err, got, tt.want)
-			}
-		})
 	}
 }
 

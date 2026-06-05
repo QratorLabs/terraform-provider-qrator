@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -23,15 +22,16 @@ type QratorClientAPI interface {
 	MakeRequest(ctx context.Context, path string, method string, params interface{}) (json.RawMessage, error)
 }
 // QratorClient is a client for interacting with the Qrator API.
-// It manages HTTP requests with authentication, debug logging, and retry logic.
+// It manages HTTP requests with authentication and debug logging.
+// No automatic retries are performed: Qrator API methods are not idempotent
+// (e.g., domain_create always creates a new domain), so retrying a failed
+// request could result in duplicate resources.
 type QratorClient struct {
-	apiKey     string        // API key for authenticating requests
-	endpoint   string        // Base URL of the Qrator API
-	client     *http.Client  // HTTP client for making requests
-	debug      bool          // Flag to enable/disable debug logging
-	idCounter  uint64        // Atomic counter for generating unique request IDs
-	maxRetries int           // Maximum number of retry attempts
-	retryDelay time.Duration // Base delay between retries
+	apiKey    string       // API key for authenticating requests
+	endpoint  string       // Base URL of the Qrator API
+	client    *http.Client // HTTP client for making requests
+	debug     bool         // Flag to enable/disable debug logging
+	idCounter uint64       // Atomic counter for generating unique request IDs
 }
 
 // APIRequest represents a JSON-RPC request to the Qrator API.
@@ -91,13 +91,11 @@ func NewQratorClient(apiKey, endpoint string, debug bool) *QratorClient {
 	}
 
 	return &QratorClient{
-		apiKey:     apiKey,
-		endpoint:   endpoint,
-		client:     client,
-		debug:      debug,
-		idCounter:  0,
-		maxRetries: 3,
-		retryDelay: 1 * time.Second,
+		apiKey:    apiKey,
+		endpoint:  endpoint,
+		client:    client,
+		debug:     debug,
+		idCounter: 0,
 	}
 }
 
@@ -113,41 +111,7 @@ func NewQratorClient(apiKey, endpoint string, debug bool) *QratorClient {
 //   - The raw JSON result from the API response.
 //   - An error if the request fails, the response status is not OK, or the API returns an error.
 func (c *QratorClient) MakeRequest(ctx context.Context, path string, method string, params interface{}) (json.RawMessage, error) {
-	var lastErr error
-
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		if attempt > 0 {
-			// Exponential backoff with jitter
-			delay := time.Duration(float64(c.retryDelay) * math.Pow(2, float64(attempt-1)))
-			if c.debug {
-				log.Printf("[DEBUG] Retrying request (attempt %d/%d) after %v", attempt, c.maxRetries, delay)
-			}
-
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		result, err := c.makeRequestAttempt(ctx, path, method, params)
-		if err == nil {
-			return result, nil
-		}
-
-		lastErr = err
-
-		// Check if the request should be retried
-		if !c.shouldRetry(err) {
-			break
-		}
-
-		if c.debug {
-			log.Printf("[DEBUG] Request failed (attempt %d/%d): %v", attempt+1, c.maxRetries+1, err)
-		}
-	}
-
-	return nil, fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, lastErr)
+	return c.makeRequestAttempt(ctx, path, method, params)
 }
 
 // makeRequestAttempt performs a single request without retry logic
@@ -280,34 +244,3 @@ func (c *QratorClient) maskSensitiveData(input string) string {
 	return input
 }
 
-// shouldRetry determines whether the request should be retried for the given error
-func (c *QratorClient) shouldRetry(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-
-	// Do not retry on API errors (typically 4xx codes)
-	if strings.Contains(errStr, "API error:") {
-		return false
-	}
-
-	// Conditions for retry
-	retryConditions := []string{
-		"connection refused",
-		"timeout",
-		"temporary failure",
-		"network",
-		"status code: 5",   // 5xx errors
-		"status code: 429", // too many requests
-	}
-
-	for _, condition := range retryConditions {
-		if strings.Contains(errStr, condition) {
-			return true
-		}
-	}
-
-	return false
-}
