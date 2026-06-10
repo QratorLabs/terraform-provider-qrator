@@ -30,6 +30,8 @@ type CDNModel struct {
 
 	WebP types.Int64 `tfsdk:"webp"`
 
+	TLSVersions types.List `tfsdk:"tls_versions"`
+
 	DefaultHost types.String `tfsdk:"default_host"`
 }
 

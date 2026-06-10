@@ -10,6 +10,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -181,6 +183,18 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Computed:    true,
 				Validators:  []validator.Int64{int64validator.Between(0, 100)},
 			},
+			"tls_versions": schema.ListAttribute{
+				Description: `Allowed TLS protocol versions for CDN client connections. Valid values: "TLSv1.0", "TLSv1.1", "TLSv1.2", "TLSv1.3". At least one of TLSv1.2 or TLSv1.3 must be included.`,
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(
+						stringvalidator.OneOf("TLSv1.0", "TLSv1.1", "TLSv1.2", "TLSv1.3"),
+					),
+				},
+			},
 			"default_host": schema.StringAttribute{
 				Description: "Default configured hostname returned by the API.",
 				Computed:    true,
@@ -208,6 +222,32 @@ func (r *CDNResource) Configure(ctx context.Context, req resource.ConfigureReque
 	}
 
 	r.client = client
+}
+
+func (r *CDNResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data CDNModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if data.TLSVersions.IsNull() || data.TLSVersions.IsUnknown() {
+		return
+	}
+
+	var versions []string
+	data.TLSVersions.ElementsAs(ctx, &versions, false)
+
+	for _, v := range versions {
+		if v == "TLSv1.2" || v == "TLSv1.3" {
+			return
+		}
+	}
+	resp.Diagnostics.AddAttributeError(
+		path.Root("tls_versions"),
+		"Invalid TLS versions",
+		"At least one of TLSv1.2 or TLSv1.3 must be included.",
+	)
 }
 
 func (r *CDNResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -437,6 +477,17 @@ func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, 
 		}
 	}
 
+	// tls_versions
+	if !IsNullOrUnknown(plan.TLSVersions) &&
+		ShouldUpdateList(plan.TLSVersions, state.TLSVersions, true) {
+		var values []string
+		plan.TLSVersions.ElementsAs(ctx, &values, false)
+		if _, err := r.client.MakeRequest(ctx, apiPath, "tls_versions_set", values); err != nil {
+			diags.AddError("Failed to update tls_versions", err.Error())
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -462,6 +513,7 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 		compressDisabled         []string
 		blockedURIEntries        []cdnBlockedURIEntry
 		whiteURI                 []string
+		tlsVersions              []string
 		defaultHost              string
 	)
 
@@ -593,6 +645,14 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 		return json.Unmarshal(v, &webp)
 	})
 
+	g.Go(func() error {
+		v, err := r.client.MakeRequest(gctx, apiPath, "tls_versions_get", nil)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(v, &tlsVersions)
+	})
+
 	if ref.DefaultHost.IsUnknown() || ref.DefaultHost.IsNull() {
 		g.Go(func() error {
 			v, err := r.client.MakeRequest(gctx, apiPath, "default_host", nil)
@@ -609,7 +669,7 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	}
 
 	// Parse ref lists for reordering API results to match user-defined order.
-	var refACLO, refClientHeaders, refUpstreamHeaders, refCompressDisabled, refWhiteURI []string
+	var refACLO, refClientHeaders, refUpstreamHeaders, refCompressDisabled, refWhiteURI, refTLSVersions []string
 	var refCacheErrors, refCacheErrorsPermanent []CDNCacheErrorEntryModel
 	var refBlockedURI []CDNBlockedURIEntryModel
 	if !IsNullOrUnknown(ref.AccessControlAllowOrigin) {
@@ -626,6 +686,9 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	}
 	if !IsNullOrUnknown(ref.WhiteURI) {
 		ref.WhiteURI.ElementsAs(ctx, &refWhiteURI, false)
+	}
+	if !IsNullOrUnknown(ref.TLSVersions) {
+		ref.TLSVersions.ElementsAs(ctx, &refTLSVersions, false)
 	}
 	if !IsNullOrUnknown(ref.CacheErrors) {
 		ref.CacheErrors.ElementsAs(ctx, &refCacheErrors, false)
@@ -705,6 +768,11 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	state.WhiteURI, _ = NormalizeStringList(ctx, state.WhiteURI)
 
 	state.WebP = types.Int64Value(webp)
+
+	tlsV := reorderByPlanOrder(refTLSVersions, tlsVersions, strKey)
+	state.TLSVersions, _ = types.ListValueFrom(ctx, types.StringType, tlsV)
+	state.TLSVersions, _ = NormalizeStringList(ctx, state.TLSVersions)
+
 	if ref.DefaultHost.IsUnknown() || ref.DefaultHost.IsNull() {
 		state.DefaultHost = types.StringValue(defaultHost)
 	} else {
