@@ -51,7 +51,7 @@ resource "qrator_cdn" "example" {
   cache_errors = [
     {
       code    = 502
-      timeout = 5000
+      timeout = 60000
     },
   ]
 
@@ -70,6 +70,9 @@ resource "qrator_cdn" "example" {
   ]
 
   white_uri = ["/api/.*", "/static/.*"]
+
+  webp         = 80
+  tls_versions = ["TLSv1.2", "TLSv1.3"]
 }
 
 # --- CDN SNI ---

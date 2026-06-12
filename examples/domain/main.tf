@@ -140,6 +140,43 @@ resource "qrator_domain_blacklist" "example" {
   ]
 }
 
+# --- Domain redirects ---
+
+resource "qrator_domain_redirects" "example" {
+  domain_id = qrator_domain.example.id
+
+  redirects = [
+    {
+      from = {
+        port = 80
+        hostname = {
+          type = "any"
+        }
+      }
+      redirect = {
+        code   = 301
+        port   = 443
+        args   = true
+      }
+    },
+    {
+      from = {
+        port = 443
+        hostname = {
+          type  = "fqdn"
+          value = "old.example.com"
+        }
+      }
+      redirect = {
+        code     = 301
+        hostname = "example.com"
+        port     = 443
+        args     = true
+      }
+    },
+  ]
+}
+
 # --- Certificate (referenced by SNI) ---
 
 resource "qrator_client_certificate" "cert" {
