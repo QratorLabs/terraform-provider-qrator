@@ -47,6 +47,14 @@ provider "qrator" {
 | `qrator_cdn_sni` | CDN SNI hostname-to-certificate mappings |
 | `qrator_client_certificate` | Client certificates (upload / Let's Encrypt) |
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `QRATOR_API_KEY` | API key for authentication. Equivalent to the `api_key` provider argument. |
+| `QRATOR_ENDPOINT` | API endpoint URL. Equivalent to the `endpoint` provider argument. |
+| `QRATOR_LOG_REQUESTS` | Set to any non-empty value to log every API call to stderr in the format `[qrator] <method> - <request_id>`. Useful for troubleshooting without enabling full Terraform debug logging. |
+
 ## Schema
 
 ### Required

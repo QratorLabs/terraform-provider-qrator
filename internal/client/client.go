@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -27,11 +28,12 @@ type QratorClientAPI interface {
 // (e.g., domain_create always creates a new domain), so retrying a failed
 // request could result in duplicate resources.
 type QratorClient struct {
-	apiKey    string       // API key for authenticating requests
-	endpoint  string       // Base URL of the Qrator API
-	client    *http.Client // HTTP client for making requests
-	debug     bool         // Flag to enable/disable debug logging
-	idCounter uint64       // Atomic counter for generating unique request IDs
+	apiKey      string       // API key for authenticating requests
+	endpoint    string       // Base URL of the Qrator API
+	client      *http.Client // HTTP client for making requests
+	debug       bool         // Flag to enable/disable debug logging
+	logRequests bool         // When true, logs "method - request_id" to stderr for every request
+	idCounter   uint64       // Atomic counter for generating unique request IDs
 }
 
 // APIRequest represents a JSON-RPC request to the Qrator API.
@@ -91,11 +93,12 @@ func NewQratorClient(apiKey, endpoint string, debug bool) *QratorClient {
 	}
 
 	return &QratorClient{
-		apiKey:    apiKey,
-		endpoint:  endpoint,
-		client:    client,
-		debug:     debug,
-		idCounter: 0,
+		apiKey:      apiKey,
+		endpoint:    endpoint,
+		client:      client,
+		debug:       debug,
+		logRequests: os.Getenv("QRATOR_LOG_REQUESTS") != "",
+		idCounter:   0,
 	}
 }
 
@@ -179,6 +182,15 @@ func (c *QratorClient) makeRequestAttempt(ctx context.Context, path string, meth
 		}
 	}()
 
+	reqID := resp.Header.Get("X-Qrator-Request-Id")
+	if c.logRequests {
+		if reqID != "" {
+			fmt.Fprintf(os.Stderr, "[qrator] %s - %s\n", method, reqID)
+		} else {
+			fmt.Fprintf(os.Stderr, "[qrator] %s - (no request id)\n", method)
+		}
+	}
+
 	// Log HTTP response if debug is enabled
 	if c.debug {
 		dump, err := httputil.DumpResponse(resp, true)
@@ -200,12 +212,18 @@ func (c *QratorClient) makeRequestAttempt(ctx context.Context, path string, meth
 
 	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
+		if reqID != "" {
+			return nil, fmt.Errorf("unexpected status code: %d, request_id: %s, body: %s", resp.StatusCode, reqID, c.maskSensitiveData(string(body)))
+		}
 		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, c.maskSensitiveData(string(body)))
 	}
 
 	// Parse JSON-RPC response
 	var apiResponse APIResponse
 	if err := json.Unmarshal(body, &apiResponse); err != nil {
+		if reqID != "" {
+			return nil, fmt.Errorf("error unmarshaling response: %w, request_id: %s, body: %s", err, reqID, c.maskSensitiveData(string(body)))
+		}
 		return nil, fmt.Errorf("error unmarshaling response: %w, body: %s", err, c.maskSensitiveData(string(body)))
 	}
 
@@ -215,10 +233,16 @@ func (c *QratorClient) makeRequestAttempt(ctx context.Context, path string, meth
 		if c.debug {
 			log.Printf("[ERROR] API error response: %s (details: %s)", *apiResponse.Error, details)
 		}
-		if details != "" {
+		switch {
+		case details != "" && reqID != "":
+			return nil, fmt.Errorf("API error: %s (%s), request_id: %s", *apiResponse.Error, details, reqID)
+		case details != "":
 			return nil, fmt.Errorf("API error: %s (%s)", *apiResponse.Error, details)
+		case reqID != "":
+			return nil, fmt.Errorf("API error: %s, request_id: %s", *apiResponse.Error, reqID)
+		default:
+			return nil, fmt.Errorf("API error: %s", *apiResponse.Error)
 		}
-		return nil, fmt.Errorf("API error: %s", *apiResponse.Error)
 	}
 
 	return apiResponse.Result, nil

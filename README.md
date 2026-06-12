@@ -80,6 +80,24 @@ export QRATOR_ENDPOINT="https://api.qrator.net"
 
 See the [`examples/`](examples/) directory for complete configurations.
 
+## Troubleshooting
+
+Set `QRATOR_LOG_REQUESTS=1` to print every API call to stderr:
+
+```shell
+export QRATOR_LOG_REQUESTS=1
+terraform apply
+```
+
+Output format (one line per request):
+
+```
+[qrator] domain_create - a1b2c3d4-e5f6-...
+[qrator] services_set - f6e5d4c3-b2a1-...
+```
+
+The request ID is also included in error messages automatically, so you can look it up in Qrator support regardless of whether the flag is set.
+
 ## Development
 
 ```shell
