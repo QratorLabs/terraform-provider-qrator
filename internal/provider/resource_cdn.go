@@ -133,10 +133,10 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 							},
 						},
 						"timeout": schema.Int64Attribute{
-							Description: "Timeout in milliseconds before the next request is allowed (60000–300000).",
+							Description: "Timeout in milliseconds before the next request is allowed (1000–300000).",
 							Required:    true,
 							Validators: []validator.Int64{
-								int64validator.Between(60000, 300000),
+								int64validator.Between(1000, 300000),
 							},
 						},
 					},
@@ -156,10 +156,10 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 							},
 						},
 						"timeout": schema.Int64Attribute{
-							Description: "Timeout in milliseconds before the next request from the same client IP is allowed (60000–300000).",
+							Description: "Timeout in milliseconds before the next request from the same client IP is allowed (1000–300000).",
 							Required:    true,
 							Validators: []validator.Int64{
-								int64validator.Between(60000, 300000),
+								int64validator.Between(1000, 300000),
 							},
 						},
 					},

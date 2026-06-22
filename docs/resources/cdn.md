@@ -108,10 +108,10 @@ terraform import qrator_cdn.example 12345
 ### Nested Schema for `cache_errors`
 
 - `code` (Number, Required) HTTP status code from upstream to cache. Allowed values: `204`, `305`, `400`, `403`, `404`, `414`, `500`, `501`, `502`, `503`, `504`.
-- `timeout` (Number, Required) Timeout in milliseconds before the next request is allowed. Must be between `60000` and `300000`.
+- `timeout` (Number, Required) Timeout in milliseconds before the next request is allowed. Must be between `1000` and `300000`.
 
 ### Nested Schema for `cache_errors_permanent`
 
 - `code` (Number, Required) HTTP status code from upstream to cache. Allowed values: `204`, `305`, `400`, `403`, `404`, `414`, `500`, `501`, `502`, `503`, `504`.
-- `timeout` (Number, Required) Timeout in milliseconds before the next request from the same client IP is allowed. Must be between `60000` and `300000`.
+- `timeout` (Number, Required) Timeout in milliseconds before the next request from the same client IP is allowed. Must be between `1000` and `300000`.
 
