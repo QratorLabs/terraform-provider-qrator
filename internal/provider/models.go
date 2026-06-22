@@ -21,9 +21,8 @@ type CDNModel struct {
 	ClientNoCache types.Bool `tfsdk:"client_no_cache"`
 	HTTP2         types.Bool `tfsdk:"http2"`
 
-	CacheErrors          types.List `tfsdk:"cache_errors"`
-	CacheErrorsPermanent types.List `tfsdk:"cache_errors_permanent"`
-	CompressDisabled     types.List `tfsdk:"compress_disabled"`
+	CacheErrors      types.List `tfsdk:"cache_errors"`
+	CompressDisabled types.List `tfsdk:"compress_disabled"`
 
 	BlockedURI types.List `tfsdk:"blocked_uri"`
 	WhiteURI   types.List `tfsdk:"white_uri"`

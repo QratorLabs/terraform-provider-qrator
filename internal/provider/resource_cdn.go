@@ -142,29 +142,6 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 					},
 				},
 			},
-			"cache_errors_permanent": schema.ListNestedAttribute{
-				Description: "Permanently cache error responses per client IP. If upstream returns a matching status code, the response is cached for the client IP for the specified timeout (ms).",
-				Optional:    true,
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"code": schema.Int64Attribute{
-							Description: "HTTP status code from upstream to cache. Allowed values: 204, 305, 400, 403, 404, 414, 500, 501, 502, 503, 504.",
-							Required:    true,
-							Validators: []validator.Int64{
-								int64validator.OneOf(204, 305, 400, 403, 404, 414, 500, 501, 502, 503, 504),
-							},
-						},
-						"timeout": schema.Int64Attribute{
-							Description: "Timeout in milliseconds before the next request from the same client IP is allowed (1000–300000).",
-							Required:    true,
-							Validators: []validator.Int64{
-								int64validator.Between(1000, 300000),
-							},
-						},
-					},
-				},
-			},
 			"compress_disabled": schema.ListAttribute{
 				Description: "List of compression algorithms to disable. Allowed values: gzip, deflate, br.",
 				Optional:    true,
@@ -432,13 +409,6 @@ func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, 
 		}
 	}
 
-	// cache_errors_permanent
-	if !IsNullOrUnknown(plan.CacheErrorsPermanent) {
-		if err := r.updateCacheErrors(ctx, apiPath, "cache_errors_permanent_set", plan.CacheErrorsPermanent, state.CacheErrorsPermanent, diags); err != nil {
-			return false
-		}
-	}
-
 	// compress_disabled
 	if !IsNullOrUnknown(plan.CompressDisabled) &&
 		ShouldUpdateList(plan.CompressDisabled, state.CompressDisabled, true) {
@@ -508,9 +478,8 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 		webp                     int64
 		upstreamHeaders          []string
 		http2                    bool
-		cacheErrors              []cdnCacheErrorEntry
-		cacheErrorsPermanent     []cdnCacheErrorEntry
-		compressDisabled         []string
+		cacheErrors      []cdnCacheErrorEntry
+		compressDisabled []string
 		blockedURIEntries        []cdnBlockedURIEntry
 		whiteURI                 []string
 		tlsVersions              []string
@@ -606,14 +575,6 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	})
 
 	g.Go(func() error {
-		v, err := r.client.MakeRequest(gctx, apiPath, "cache_errors_permanent_get", nil)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(v, &cacheErrorsPermanent)
-	})
-
-	g.Go(func() error {
 		v, err := r.client.MakeRequest(gctx, apiPath, "compress_disabled_get", nil)
 		if err != nil {
 			return err
@@ -670,7 +631,7 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 
 	// Parse ref lists for reordering API results to match user-defined order.
 	var refACLO, refClientHeaders, refUpstreamHeaders, refCompressDisabled, refWhiteURI, refTLSVersions []string
-	var refCacheErrors, refCacheErrorsPermanent []CDNCacheErrorEntryModel
+	var refCacheErrors []CDNCacheErrorEntryModel
 	var refBlockedURI []CDNBlockedURIEntryModel
 	if !IsNullOrUnknown(ref.AccessControlAllowOrigin) {
 		ref.AccessControlAllowOrigin.ElementsAs(ctx, &refACLO, false)
@@ -692,9 +653,6 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	}
 	if !IsNullOrUnknown(ref.CacheErrors) {
 		ref.CacheErrors.ElementsAs(ctx, &refCacheErrors, false)
-	}
-	if !IsNullOrUnknown(ref.CacheErrorsPermanent) {
-		ref.CacheErrorsPermanent.ElementsAs(ctx, &refCacheErrorsPermanent, false)
 	}
 	if !IsNullOrUnknown(ref.BlockedURI) {
 		ref.BlockedURI.ElementsAs(ctx, &refBlockedURI, false)
@@ -743,12 +701,6 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 
 	ceModels := reorderByPlanOrder(refCacheErrors, cacheErrorEntriesToModels(cacheErrors), ceKey)
 	state.CacheErrors = cacheErrorModelsToList(ctx, ceModels, diags)
-	if diags.HasError() {
-		return CDNModel{}, false
-	}
-
-	cePermModels := reorderByPlanOrder(refCacheErrorsPermanent, cacheErrorEntriesToModels(cacheErrorsPermanent), ceKey)
-	state.CacheErrorsPermanent = cacheErrorModelsToList(ctx, cePermModels, diags)
 	if diags.HasError() {
 		return CDNModel{}, false
 	}

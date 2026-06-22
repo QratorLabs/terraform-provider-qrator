@@ -55,13 +55,6 @@ resource "qrator_cdn" "example" {
     },
   ]
 
-  cache_errors_permanent = [
-    {
-      code    = 429
-      timeout = 60000
-    },
-  ]
-
   blocked_uri = [
     {
       uri  = "/admin/.*"
