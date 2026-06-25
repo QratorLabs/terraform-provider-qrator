@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 
 	"github.com/qratorlabs/terraform-provider-qrator/internal/client"
@@ -17,13 +18,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -42,6 +43,7 @@ func (r *CDNResource) Metadata(ctx context.Context, req resource.MetadataRequest
 func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a CDN configuration for a domain in Qrator.",
+		Version:     1,
 		Attributes: map[string]schema.Attribute{
 			"domain_id": schema.Int64Attribute{
 				Description: "The ID of the domain to configure CDN for.",
@@ -74,11 +76,35 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 					int64validator.OneOf(301, 302, 307, 308),
 				},
 			},
-			"cache_ignore_params": schema.BoolAttribute{
-				Description: "Whether to ignore query parameters when caching.",
+			"cache_query_params": schema.SingleNestedAttribute{
+				Description: `Controls which query parameters are included in the cache key. mode "ignore" excludes the listed params from the cache key (blacklist); mode "use" includes only the listed params (whitelist). With an empty params list, "ignore" means all params are used and "use" means all params are ignored. Default: {mode: "ignore", params: []}.`,
 				Optional:    true,
-				Default:     booldefault.StaticBool(false),
 				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"mode": schema.StringAttribute{
+						Description: `"ignore" — exclude listed params from cache key. "use" — include only listed params.`,
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("ignore", "use"),
+						},
+					},
+					"params": schema.ListAttribute{
+						Description: "Query parameter names. Up to 100 entries, each 1–255 URL-safe characters.",
+						Required:    true,
+						ElementType: types.StringType,
+						Validators: []validator.List{
+							listvalidator.UniqueValues(),
+							listvalidator.SizeAtMost(100),
+							listvalidator.ValueStringsAre(
+								stringvalidator.LengthBetween(1, 255),
+								stringvalidator.RegexMatches(
+									cacheQueryParamNameRE,
+									"must contain only URL-safe characters (alphanumeric, percent-encoded, or [-_.~])",
+								),
+							),
+						},
+					},
+				},
 			},
 			"client_headers": schema.ListAttribute{
 				Description: "Headers that will be added to every response sent by CDN to client. Format: header:value.",
@@ -227,6 +253,127 @@ func (r *CDNResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 	)
 }
 
+func (r *CDNResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: {
+			PriorSchema: &schema.Schema{
+				Attributes: map[string]schema.Attribute{
+					"domain_id": schema.Int64Attribute{Required: true},
+					"access_control_allow_origin": schema.ListAttribute{
+						Optional: true, Computed: true, ElementType: types.StringType,
+					},
+					"cache_control":   schema.StringAttribute{Optional: true, Computed: true},
+					"client_no_cache": schema.BoolAttribute{Optional: true, Computed: true},
+					"redirect_code":   schema.Int64Attribute{Optional: true},
+					"cache_ignore_params": schema.BoolAttribute{
+						Optional: true, Computed: true,
+					},
+					"client_headers":   schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType},
+					"client_ip_header": schema.StringAttribute{Optional: true, Computed: true},
+					"upstream_headers": schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType},
+					"http2":            schema.BoolAttribute{Optional: true, Computed: true},
+					"cache_errors": schema.ListNestedAttribute{
+						Optional: true, Computed: true,
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"code":    schema.Int64Attribute{Required: true},
+								"timeout": schema.Int64Attribute{Required: true},
+							},
+						},
+					},
+					"cache_errors_permanent": schema.ListNestedAttribute{
+						Optional: true, Computed: true,
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"code":    schema.Int64Attribute{Required: true},
+								"timeout": schema.Int64Attribute{Required: true},
+							},
+						},
+					},
+					"compress_disabled": schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType},
+					"blocked_uri": schema.ListNestedAttribute{
+						Optional: true, Computed: true,
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"uri":  schema.StringAttribute{Required: true},
+								"code": schema.Int64Attribute{Required: true},
+							},
+						},
+					},
+					"white_uri":    schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType},
+					"webp":         schema.Int64Attribute{Optional: true, Computed: true},
+					"tls_versions": schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType},
+					"default_host": schema.StringAttribute{Computed: true},
+				},
+			},
+			StateUpgrader: func(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+				type cdnModelV0 struct {
+					DomainID                 types.Int64  `tfsdk:"domain_id"`
+					AccessControlAllowOrigin types.List   `tfsdk:"access_control_allow_origin"`
+					CacheControl             types.String `tfsdk:"cache_control"`
+					ClientNoCache            types.Bool   `tfsdk:"client_no_cache"`
+					RedirectCode             types.Int64  `tfsdk:"redirect_code"`
+					CacheIgnoreParams        types.Bool   `tfsdk:"cache_ignore_params"`
+					ClientHeaders            types.List   `tfsdk:"client_headers"`
+					ClientIPHeader           types.String `tfsdk:"client_ip_header"`
+					UpstreamHeaders          types.List   `tfsdk:"upstream_headers"`
+					HTTP2                    types.Bool   `tfsdk:"http2"`
+					CacheErrors              types.List   `tfsdk:"cache_errors"`
+					CacheErrorsPermanent     types.List   `tfsdk:"cache_errors_permanent"`
+					CompressDisabled         types.List   `tfsdk:"compress_disabled"`
+					BlockedURI               types.List   `tfsdk:"blocked_uri"`
+					WhiteURI                 types.List   `tfsdk:"white_uri"`
+					WebP                     types.Int64  `tfsdk:"webp"`
+					TLSVersions              types.List   `tfsdk:"tls_versions"`
+					DefaultHost              types.String `tfsdk:"default_host"`
+				}
+
+				var v0 cdnModelV0
+				resp.Diagnostics.Append(req.State.Get(ctx, &v0)...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+
+				// cache_ignore_params = true  → mode "use",    params [] (ignore all: whitelist of nothing)
+				// cache_ignore_params = false → mode "ignore", params [] (use all: blacklist of nothing)
+				mode := "ignore"
+				if !v0.CacheIgnoreParams.IsNull() && v0.CacheIgnoreParams.ValueBool() {
+					mode = "use"
+				}
+				cqpObj, d := types.ObjectValueFrom(ctx, cacheQueryParamsAttrTypes, CDNCacheQueryParamsModel{
+					Mode:   types.StringValue(mode),
+					Params: types.ListValueMust(types.StringType, []attr.Value{}),
+				})
+				resp.Diagnostics.Append(d...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+
+				v1 := CDNModel{
+					DomainID:                 v0.DomainID,
+					AccessControlAllowOrigin: v0.AccessControlAllowOrigin,
+					CacheControl:             v0.CacheControl,
+					ClientNoCache:            v0.ClientNoCache,
+					RedirectCode:             v0.RedirectCode,
+					CacheQueryParams:         cqpObj,
+					ClientHeaders:            v0.ClientHeaders,
+					ClientIPHeader:           v0.ClientIPHeader,
+					UpstreamHeaders:          v0.UpstreamHeaders,
+					HTTP2:                    v0.HTTP2,
+					CacheErrors:              v0.CacheErrors,
+					CompressDisabled:         v0.CompressDisabled,
+					BlockedURI:               v0.BlockedURI,
+					WhiteURI:                 v0.WhiteURI,
+					WebP:                     v0.WebP,
+					TLSVersions:              v0.TLSVersions,
+					DefaultHost:              v0.DefaultHost,
+				}
+				resp.Diagnostics.Append(resp.State.Set(ctx, &v1)...)
+			},
+		},
+	}
+}
+
 func (r *CDNResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	id, err := strconv.ParseInt(req.ID, 10, 64)
 	if err != nil {
@@ -353,12 +500,28 @@ func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, 
 		}
 	}
 
-	// cache_ignore_params
-	if !IsNullOrUnknown(plan.CacheIgnoreParams) &&
-		(state.CacheIgnoreParams.IsNull() || plan.CacheIgnoreParams.ValueBool() != state.CacheIgnoreParams.ValueBool()) {
-		if _, err := r.client.MakeRequest(ctx, apiPath, "cache_ignore_params_set", plan.CacheIgnoreParams.ValueBool()); err != nil {
-			diags.AddError("Failed to update cache_ignore_params", err.Error())
-			return false
+	// cache_query_params
+	if !IsNullOrUnknown(plan.CacheQueryParams) {
+		var planCQP CDNCacheQueryParamsModel
+		plan.CacheQueryParams.As(ctx, &planCQP, basetypes.ObjectAsOptions{})
+
+		shouldUpdate := IsNullOrUnknown(state.CacheQueryParams)
+		if !shouldUpdate {
+			var stateCQP CDNCacheQueryParamsModel
+			state.CacheQueryParams.As(ctx, &stateCQP, basetypes.ObjectAsOptions{})
+			shouldUpdate = planCQP.Mode.ValueString() != stateCQP.Mode.ValueString() ||
+				!StringListsEqualIgnoreOrder(planCQP.Params, stateCQP.Params)
+		}
+		if shouldUpdate {
+			var params []string
+			planCQP.Params.ElementsAs(ctx, &params, false)
+			if _, err := r.client.MakeRequest(ctx, apiPath, "cache_query_params_set", apiCacheQueryParams{
+				Mode:   planCQP.Mode.ValueString(),
+				Params: params,
+			}); err != nil {
+				diags.AddError("Failed to update cache_query_params", err.Error())
+				return false
+			}
 		}
 	}
 
@@ -472,7 +635,7 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 		cacheControlRaw          json.RawMessage
 		redirectCode             *int64
 		clientNoCache            bool
-		cacheIgnoreParams        bool
+		cacheQueryParams         apiCacheQueryParams
 		clientHeaders            []string
 		clientIPHeader           *string
 		webp                     int64
@@ -514,11 +677,11 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	})
 
 	g.Go(func() error {
-		v, err := r.client.MakeRequest(gctx, apiPath, "cache_ignore_params_get", nil)
+		v, err := r.client.MakeRequest(gctx, apiPath, "cache_query_params_get", nil)
 		if err != nil {
 			return err
 		}
-		return json.Unmarshal(v, &cacheIgnoreParams)
+		return json.Unmarshal(v, &cacheQueryParams)
 	})
 
 	g.Go(func() error {
@@ -681,7 +844,28 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 		state.RedirectCode = types.Int64Value(*redirectCode)
 	}
 	state.ClientNoCache = types.BoolValue(clientNoCache)
-	state.CacheIgnoreParams = types.BoolValue(cacheIgnoreParams)
+
+	var refCQPParams []string
+	if !IsNullOrUnknown(ref.CacheQueryParams) {
+		var refCQP CDNCacheQueryParamsModel
+		ref.CacheQueryParams.As(ctx, &refCQP, basetypes.ObjectAsOptions{})
+		refCQP.Params.ElementsAs(ctx, &refCQPParams, false)
+	}
+	reorderedCQPParams := reorderByPlanOrder(refCQPParams, cacheQueryParams.Params, strKey)
+	cqpParamsList, d := types.ListValueFrom(ctx, types.StringType, reorderedCQPParams)
+	diags.Append(d...)
+	if diags.HasError() {
+		return CDNModel{}, false
+	}
+	cqpObj, d := types.ObjectValueFrom(ctx, cacheQueryParamsAttrTypes, CDNCacheQueryParamsModel{
+		Mode:   types.StringValue(cacheQueryParams.Mode),
+		Params: cqpParamsList,
+	})
+	diags.Append(d...)
+	if diags.HasError() {
+		return CDNModel{}, false
+	}
+	state.CacheQueryParams = cqpObj
 
 	ch := reorderByPlanOrder(refClientHeaders, clientHeaders, strKey)
 	state.ClientHeaders, _ = types.ListValueFrom(ctx, types.StringType, ch)
@@ -748,6 +932,19 @@ var cacheErrorAttrTypes = map[string]attr.Type{
 var blockedURIAttrTypes = map[string]attr.Type{
 	"uri":  types.StringType,
 	"code": types.Int64Type,
+}
+
+var cacheQueryParamsAttrTypes = map[string]attr.Type{
+	"mode":   types.StringType,
+	"params": types.ListType{ElemType: types.StringType},
+}
+
+var cacheQueryParamNameRE = regexp.MustCompile(`^(?:[a-zA-Z0-9]|%[a-fA-F0-9]{2}|[-_.~])+$`)
+
+// apiCacheQueryParams is the wire format for cache_query_params_set/get.
+type apiCacheQueryParams struct {
+	Mode   string   `json:"mode"`
+	Params []string `json:"params"`
 }
 
 // updateCacheErrors calls the specified API method if the cache errors configuration has changed.

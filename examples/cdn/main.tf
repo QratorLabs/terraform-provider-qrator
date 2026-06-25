@@ -38,8 +38,11 @@ resource "qrator_cdn" "example" {
 
   access_control_allow_origin = ["https://(www\\.)?example\\.com"]
 
-  cache_ignore_params = false
-  client_no_cache     = false
+  cache_query_params = {
+    mode   = "ignore"
+    params = ["utm_source", "utm_medium"]
+  }
+  client_no_cache = false
   redirect_code       = 301
 
   client_headers   = ["X-Custom-Header:value"]

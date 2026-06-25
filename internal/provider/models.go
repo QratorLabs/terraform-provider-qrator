@@ -12,7 +12,7 @@ type CDNModel struct {
 	CacheControl             types.String `tfsdk:"cache_control"`
 	RedirectCode             types.Int64  `tfsdk:"redirect_code"`
 
-	CacheIgnoreParams types.Bool   `tfsdk:"cache_ignore_params"`
+	CacheQueryParams types.Object `tfsdk:"cache_query_params"`
 	ClientHeaders     types.List   `tfsdk:"client_headers"`
 	ClientIPHeader    types.String `tfsdk:"client_ip_header"`
 
@@ -38,6 +38,12 @@ type CDNModel struct {
 type CDNSNIEntryModel struct {
 	Host        types.String `tfsdk:"host"`
 	Certificate types.Int64  `tfsdk:"certificate"`
+}
+
+// CDNCacheQueryParamsModel defines the model for cache_query_params.
+type CDNCacheQueryParamsModel struct {
+	Mode   types.String `tfsdk:"mode"`
+	Params types.List   `tfsdk:"params"`
 }
 
 // CDNBlockedURIEntryModel defines the model for a CDN blocked URI entry.

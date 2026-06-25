@@ -19,15 +19,20 @@ resource "qrator_cdn" "example" {
 
   access_control_allow_origin = ["https://(www\\.)?example\\.com"]
 
-  cache_ignore_params = false
-  client_no_cache     = false
-  redirect_code       = 301
+  cache_query_params = {
+    mode   = "ignore"
+    params = ["utm_source", "utm_medium"]
+  }
+
+  client_no_cache = false
+  redirect_code   = 301
 
   client_headers   = ["X-Custom-Header:value"]
   client_ip_header = "X-Real-IP"
   upstream_headers = ["X-CDN-Service:Qrator"]
 
   compress_disabled = ["br"]
+  tls_versions      = ["TLSv1.2", "TLSv1.3"]
 
   cache_errors = [
     {
@@ -46,8 +51,6 @@ resource "qrator_cdn" "example" {
   white_uri = ["/api/.*", "/static/.*"]
 
   webp = 80
-
-  tls_versions = ["TLSv1.2", "TLSv1.3"]
 }
 
 output "cdn_default_host" {
@@ -74,7 +77,7 @@ terraform import qrator_cdn.example 12345
 
 - `access_control_allow_origin` (List of String) List of origin regex patterns. If the Origin header from the client matches one of the patterns, CDN adds an Access-Control-Allow-Origin header equal to the received Origin value.
 - `cache_control` (String) Controls cache TTL. `"cdn"` — CDN controls with default 6h; a number (`"7200"`–`"604800"`) — CDN controls with custom timeout in seconds; `"origin"` — origin Cache-Control/Expires headers are used. Defaults to `"cdn"`.
-- `cache_ignore_params` (Boolean) Whether to ignore query parameters when caching. Defaults to `false`.
+- `cache_query_params` (Attributes) Controls which query parameters are included in the cache key. Default: `{mode: "ignore", params: []}` — all params used. See [Nested Schema for `cache_query_params`](#nested-schema-for-cache_query_params).
 - `client_headers` (List of String) Headers that will be added to every response sent by CDN to client. Format: `header:value`.
 - `client_ip_header` (String) Name of the header containing the real client IP address.
 - `redirect_code` (Number) HTTP-to-HTTPS redirect status code returned by CDN edge nodes. Must be `301`, `302`, `307`, or `308`. Leave unset to disable.
@@ -91,6 +94,11 @@ terraform import qrator_cdn.example 12345
 ### Read-Only
 
 - `default_host` (String) Default configured hostname returned by the API.
+
+### Nested Schema for `cache_query_params`
+
+- `mode` (String, Required) `"ignore"` — exclude listed params from cache key (blacklist). `"use"` — include only listed params (whitelist). With an empty `params` list, `"ignore"` uses all params and `"use"` ignores all params.
+- `params` (List of String, Required) Query parameter names. Up to 100 entries, 1–255 characters each, matching URL-safe pattern `[a-zA-Z0-9%hex\-_.~]+`.
 
 ### Nested Schema for `blocked_uri`
 
