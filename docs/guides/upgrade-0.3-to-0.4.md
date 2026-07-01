@@ -6,10 +6,11 @@ description: |-
 
 # Upgrading from v0.3 to v0.4
 
-Version 0.4 includes two breaking changes that require updating your Terraform configuration files:
+Version 0.4 includes three breaking changes that require updating your Terraform configuration files:
 
 1. **IP list resources** — `entries` attribute changed from a list of objects to a map keyed by IP address.
 2. **CDN resource** — `cache_ignore_params` replaced by `cache_query_params`.
+3. **CDN resource** — `cache_errors_permanent` removed.
 
 In both cases the provider automatically migrates your state file on the first `terraform plan` with the new binary. **You only need to update your `.tf` configuration files.**
 
@@ -148,6 +149,25 @@ An argument named "cache_ignore_params" is not expected here.
 
 ---
 
+## 3. CDN: `cache_errors_permanent` removed
+
+Affects: `qrator_cdn`.
+
+### What changed
+
+The `cache_errors_permanent` attribute has been removed. If it is present in your configuration, `terraform plan` will error:
+
+```
+Error: Unsupported argument
+An argument named "cache_errors_permanent" is not expected here.
+```
+
+### Migration
+
+Remove the `cache_errors_permanent` block from your `qrator_cdn` resources. The state is cleaned up automatically by the same v0→v1 state upgrader as `cache_query_params`.
+
+---
+
 ## Upgrade steps
 
 1. **Update the provider version** in your `terraform` block:
@@ -167,7 +187,7 @@ An argument named "cache_ignore_params" is not expected here.
 
 2. **Update IP list resources** — convert `entries = [...]` to `entries = { ... }` in all four IP list resources.
 
-3. **Update CDN resources** — remove `cache_ignore_params` and add `cache_query_params` if you need non-default behaviour; otherwise omit the attribute.
+3. **Update CDN resources** — remove `cache_ignore_params` and `cache_errors_permanent`; add `cache_query_params` if you need non-default behaviour, otherwise omit it.
 
 4. **Run `terraform plan`** — the provider migrates state automatically. Review the plan output. No unexpected changes should appear.
 
