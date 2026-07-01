@@ -84,12 +84,12 @@ terraform import qrator_domain_blacklist.example <domain_id>
 ```terraform
 resource "qrator_domain_whitelist" "example" {
   domain_id = <domain_id>
-  entries   = []
+  entries   = {}
 }
 
 resource "qrator_domain_blacklist" "example" {
   domain_id = <domain_id>
-  entries   = []
+  entries   = {}
 }
 ```
 
@@ -152,12 +152,12 @@ terraform import qrator_service_blacklist.example <service_id>
 ```terraform
 resource "qrator_service_whitelist" "example" {
   service_id = <service_id>
-  entries    = []
+  entries    = {}
 }
 
 resource "qrator_service_blacklist" "example" {
   service_id = <service_id>
-  entries    = []
+  entries    = {}
 }
 ```
 

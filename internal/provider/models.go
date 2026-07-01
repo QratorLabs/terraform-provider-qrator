@@ -187,9 +187,16 @@ type DomainRedirectTargetModel struct {
 	Args     types.Bool   `tfsdk:"args"`
 }
 
-// IPListEntryModel defines a single IP entry (whitelist or blacklist).
+// IPListEntryModel defines a single IP entry for internal API operations.
 type IPListEntryModel struct {
 	IP      types.String `tfsdk:"ip"`
+	TTL     types.Int64  `tfsdk:"ttl"`
+	Comment types.String `tfsdk:"comment"`
+}
+
+// IPListEntryValueModel is the nested value for a map-based IP list entry.
+// The map key (IP address) is the entry identifier; only ttl and comment are stored here.
+type IPListEntryValueModel struct {
 	TTL     types.Int64  `tfsdk:"ttl"`
 	Comment types.String `tfsdk:"comment"`
 }

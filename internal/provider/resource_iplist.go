@@ -22,10 +22,6 @@ import (
 	"github.com/qratorlabs/terraform-provider-qrator/internal/client"
 )
 
-// ---------------------------------------------------------------------------
-// Generic IP list resource (whitelist / blacklist) for domain or service
-// ---------------------------------------------------------------------------
-
 type ipListKind string
 
 const (
@@ -63,9 +59,9 @@ func NewServiceBlacklistResource() resource.Resource {
 // ---------------------------------------------------------------------------
 
 var (
-	_ resource.Resource                   = &IPListResource{}
-	_ resource.ResourceWithImportState    = &IPListResource{}
-	_ resource.ResourceWithValidateConfig = &IPListResource{}
+	_ resource.Resource                 = &IPListResource{}
+	_ resource.ResourceWithImportState  = &IPListResource{}
+	_ resource.ResourceWithUpgradeState = &IPListResource{}
 )
 
 type IPListResource struct {
@@ -91,15 +87,11 @@ func (r *IPListResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				int64planmodifier.RequiresReplace(),
 			},
 		},
-		"entries": schema.ListNestedAttribute{
-			Description: fmt.Sprintf("IP entries in the %s.", r.kind),
+		"entries": schema.MapNestedAttribute{
+			Description: fmt.Sprintf("IP entries in the %s. Each key is an IP address.", r.kind),
 			Required:    true,
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
-					"ip": schema.StringAttribute{
-						Description: "IP address (e.g. 203.0.113.1).",
-						Required:    true,
-					},
 					"ttl": schema.Int64Attribute{
 						Description: "Time to live in seconds. 0 means permanent.",
 						Optional:    true,
@@ -118,6 +110,13 @@ func (r *IPListResource) Schema(ctx context.Context, req resource.SchemaRequest,
 		},
 	}
 
+	attrs["exclusive"] = schema.BoolAttribute{
+		Description: "When true (default), removes any IP not present in entries (including UI-added). When false, only entries defined here are managed; externally added IPs are left untouched.",
+		Optional:    true,
+		Computed:    true,
+		Default:     booldefault.StaticBool(true),
+	}
+
 	if r.kind == ipListWhitelist {
 		attrs["default_drop"] = schema.BoolAttribute{
 			Description: "Drop traffic from non-whitelisted IPs. When true, only whitelisted IPs are allowed.",
@@ -128,6 +127,7 @@ func (r *IPListResource) Schema(ctx context.Context, req resource.SchemaRequest,
 	}
 
 	resp.Schema = schema.Schema{
+		Version:     1,
 		Description: fmt.Sprintf("Manages the %s for a %s in Qrator.", r.kind, r.entity),
 		Attributes:  attrs,
 	}
@@ -151,36 +151,6 @@ func (r *IPListResource) Configure(ctx context.Context, req resource.ConfigureRe
 }
 
 // ---------------------------------------------------------------------------
-// ValidateConfig
-// ---------------------------------------------------------------------------
-
-func (r *IPListResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var entriesList types.List
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("entries"), &entriesList)...)
-	if resp.Diagnostics.HasError() || entriesList.IsUnknown() || entriesList.IsNull() {
-		return
-	}
-	var entries []IPListEntryModel
-	resp.Diagnostics.Append(entriesList.ElementsAs(ctx, &entries, false)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	seen := make(map[string]bool)
-	for i, e := range entries {
-		if e.IP.IsUnknown() {
-			continue
-		}
-		ip := e.IP.ValueString()
-		if seen[ip] {
-			resp.Diagnostics.AddAttributeError(path.Root("entries").AtListIndex(i),
-				"Duplicate IP", fmt.Sprintf("Duplicate IP entry %q", ip))
-		}
-		seen[ip] = true
-	}
-}
-
-// ---------------------------------------------------------------------------
 // ImportState
 // ---------------------------------------------------------------------------
 
@@ -200,18 +170,20 @@ func (r *IPListResource) ImportState(ctx context.Context, req resource.ImportSta
 func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
-	var entries []IPListEntryModel
+	var entries map[string]IPListEntryValueModel
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("entries"), &entries)...)
+	var exclusive types.Bool
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("exclusive"), &exclusive)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	r.syncEntries(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
+	r.syncEntries(ctx, entityID.ValueInt64(), nil, entries, exclusive.ValueBool(), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, exclusive.ValueBool())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries after create", err.Error())
 		return
@@ -219,15 +191,15 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("exclusive"), exclusive)...)
 
-	// Set default_drop for whitelist.
 	if r.kind == ipListWhitelist {
 		var defaultDrop types.Bool
 		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("default_drop"), &defaultDrop)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if !defaultDrop.IsNull() && !defaultDrop.IsUnknown() && defaultDrop.ValueBool() {
+		if defaultDrop.ValueBool() {
 			apiPath := r.entity.apiPath(entityID.ValueInt64())
 			if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{"drop"}); err != nil {
 				resp.Diagnostics.AddError("Failed to set default_drop", err.Error())
@@ -245,13 +217,15 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
-	var stateEntries []IPListEntryModel
+	var stateEntries map[string]IPListEntryValueModel
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("entries"), &stateEntries)...)
+	var exclusive types.Bool
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("exclusive"), &exclusive)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), stateEntries, &resp.Diagnostics)
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), stateEntries, exclusive.ValueBool())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries", err.Error())
 		return
@@ -259,8 +233,8 @@ func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("exclusive"), exclusive)...)
 
-	// Read default_drop for whitelist.
 	if r.kind == ipListWhitelist {
 		apiPath := r.entity.apiPath(entityID.ValueInt64())
 		canRead := true
@@ -285,7 +259,6 @@ func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, res
 			}
 			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("default_drop"), types.BoolValue(policy == "drop"))...)
 		}
-		// When service is offline, default_drop stays at its current state value.
 	}
 }
 
@@ -296,18 +269,22 @@ func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, res
 func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
-	var entries []IPListEntryModel
+	var stateEntries map[string]IPListEntryValueModel
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("entries"), &stateEntries)...)
+	var entries map[string]IPListEntryValueModel
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("entries"), &entries)...)
+	var exclusive types.Bool
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("exclusive"), &exclusive)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	r.syncEntries(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
+	r.syncEntries(ctx, entityID.ValueInt64(), stateEntries, entries, exclusive.ValueBool(), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, &resp.Diagnostics)
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, exclusive.ValueBool())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries after update", err.Error())
 		return
@@ -315,8 +292,8 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("exclusive"), exclusive)...)
 
-	// Update default_drop for whitelist.
 	if r.kind == ipListWhitelist {
 		var planDrop, stateDrop types.Bool
 		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("default_drop"), &planDrop)...)
@@ -324,8 +301,7 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if !planDrop.IsNull() && !planDrop.IsUnknown() &&
-			(stateDrop.IsNull() || planDrop.ValueBool() != stateDrop.ValueBool()) {
+		if planDrop.ValueBool() != stateDrop.ValueBool() {
 			apiPath := r.entity.apiPath(entityID.ValueInt64())
 			apiVal := "accept"
 			if planDrop.ValueBool() {
@@ -353,7 +329,6 @@ func (r *IPListResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 	apiPath := r.entity.apiPath(entityID.ValueInt64())
 
-	// Reset policy for whitelist.
 	if r.kind == ipListWhitelist {
 		if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{"accept"}); err != nil {
 			tflog.Warn(ctx, fmt.Sprintf("Failed to reset not_whitelisted_policy: %s", err))
@@ -366,14 +341,9 @@ func (r *IPListResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
-// ---------------------------------------------------------------------------
-// syncEntries — read current API state, compute diff, apply changes
-// ---------------------------------------------------------------------------
-
-func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, desired []IPListEntryModel, diags *diag.Diagnostics) {
+func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, prevEntries, desired map[string]IPListEntryValueModel, exclusive bool, diags *diag.Diagnostics) {
 	apiPath := r.entity.apiPath(entityID)
 
-	// Read current API state.
 	v, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodGet(), []interface{}{"tuple"})
 	if err != nil {
 		diags.AddError("Failed to read current entries", err.Error())
@@ -388,31 +358,38 @@ func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, desire
 		return
 	}
 
-	// Build lookups by IP.
-	currentByIP := make(map[string]*IPListEntryModel, len(current))
-	for i := range current {
-		currentByIP[current[i].IP.ValueString()] = &current[i]
-	}
-	desiredByIP := make(map[string]*IPListEntryModel, len(desired))
-	for i := range desired {
-		desiredByIP[desired[i].IP.ValueString()] = &desired[i]
+	currentByIP := make(map[string]IPListEntryValueModel, len(current))
+	for _, e := range current {
+		currentByIP[e.IP.ValueString()] = IPListEntryValueModel{TTL: e.TTL, Comment: e.Comment}
 	}
 
-	// Entries in API but not desired, or changed → remove.
 	var toRemove []string
-	for ip, ce := range currentByIP {
-		de, exists := desiredByIP[ip]
-		if !exists || !ipEntryEqual(ce, de) {
+	var toAdd []IPListEntryModel
+
+	for ip := range currentByIP {
+		_, inDesired := desired[ip]
+		if inDesired {
+			continue
+		}
+		if exclusive {
 			toRemove = append(toRemove, ip)
+		} else {
+			if _, inPrev := prevEntries[ip]; inPrev {
+				toRemove = append(toRemove, ip)
+			}
 		}
 	}
 
-	// Entries desired but not in API, or changed → append.
-	var toAdd []IPListEntryModel
-	for ip, de := range desiredByIP {
+	// Permanent entries (ttl=0) cannot be overwritten in-place; remove first.
+	for ip, de := range desired {
 		ce, exists := currentByIP[ip]
-		if !exists || !ipEntryEqual(ce, de) {
-			toAdd = append(toAdd, *de)
+		if !exists {
+			toAdd = append(toAdd, IPListEntryModel{IP: types.StringValue(ip), TTL: de.TTL, Comment: de.Comment})
+		} else if !entryValueEqual(ce, de) {
+			if ce.TTL.ValueInt64() == 0 {
+				toRemove = append(toRemove, ip)
+			}
+			toAdd = append(toAdd, IPListEntryModel{IP: types.StringValue(ip), TTL: de.TTL, Comment: de.Comment})
 		}
 	}
 
@@ -434,10 +411,7 @@ func (r *IPListResource) syncEntries(ctx context.Context, entityID int64, desire
 	}
 }
 
-// readAndReconcile — read API entries and reorder to match state order.
-// ---------------------------------------------------------------------------
-
-func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, stateEntries []IPListEntryModel, diags *diag.Diagnostics) ([]IPListEntryModel, error) {
+func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, desired map[string]IPListEntryValueModel, exclusive bool) (map[string]IPListEntryValueModel, error) {
 	apiPath := r.entity.apiPath(entityID)
 
 	v, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodGet(), []interface{}{"tuple"})
@@ -452,9 +426,18 @@ func (r *IPListResource) readAndReconcile(ctx context.Context, entityID int64, s
 		return nil, fmt.Errorf("failed to parse %s response: %w", r.kind.methodGet(), err)
 	}
 
-	result := reorderByPlanOrder(stateEntries, apiEntries, func(e *IPListEntryModel) string { return e.IP.ValueString() })
-	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d entries (API: %d)", r.entity, entityID, r.kind, len(result), len(apiEntries)))
-	return result, nil
+	managed := make(map[string]IPListEntryValueModel, len(desired))
+	for _, e := range apiEntries {
+		ip := e.IP.ValueString()
+		if exclusive {
+			managed[ip] = IPListEntryValueModel{TTL: e.TTL, Comment: e.Comment}
+		} else if _, ok := desired[ip]; ok {
+			managed[ip] = IPListEntryValueModel{TTL: e.TTL, Comment: e.Comment}
+		}
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("Read %s %d %s: %d managed entries (API total: %d)", r.entity, entityID, r.kind, len(managed), len(apiEntries)))
+	return managed, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -509,8 +492,159 @@ func entriesToAPITuples(entries []IPListEntryModel) [][]interface{} {
 	return tuples
 }
 
-func ipEntryEqual(a, b *IPListEntryModel) bool {
-	return a.IP.ValueString() == b.IP.ValueString() &&
-		a.TTL.ValueInt64() == b.TTL.ValueInt64() &&
+func entryValueEqual(a, b IPListEntryValueModel) bool {
+	return a.TTL.ValueInt64() == b.TTL.ValueInt64() &&
 		a.Comment.ValueString() == b.Comment.ValueString()
+}
+
+// ---------------------------------------------------------------------------
+// State upgrade v0 → v1: entries Set{ip,ttl,comment} → Map[ip]{ttl,comment}
+// ---------------------------------------------------------------------------
+
+// v0 state structs — one per entity×kind combination.
+
+type ipListV0DomainWhitelist struct {
+	DomainID    types.Int64        `tfsdk:"domain_id"`
+	Entries     []IPListEntryModel `tfsdk:"entries"`
+	DefaultDrop types.Bool         `tfsdk:"default_drop"`
+}
+
+type ipListV0DomainBlacklist struct {
+	DomainID types.Int64        `tfsdk:"domain_id"`
+	Entries  []IPListEntryModel `tfsdk:"entries"`
+}
+
+type ipListV0ServiceWhitelist struct {
+	ServiceID   types.Int64        `tfsdk:"service_id"`
+	Entries     []IPListEntryModel `tfsdk:"entries"`
+	DefaultDrop types.Bool         `tfsdk:"default_drop"`
+}
+
+type ipListV0ServiceBlacklist struct {
+	ServiceID types.Int64        `tfsdk:"service_id"`
+	Entries   []IPListEntryModel `tfsdk:"entries"`
+}
+
+// v1 state structs — used only in the upgrader to drive resp.State.Set.
+
+type ipListV1DomainWhitelist struct {
+	DomainID    types.Int64                     `tfsdk:"domain_id"`
+	Entries     map[string]IPListEntryValueModel `tfsdk:"entries"`
+	Exclusive   types.Bool                      `tfsdk:"exclusive"`
+	DefaultDrop types.Bool                      `tfsdk:"default_drop"`
+}
+
+type ipListV1DomainBlacklist struct {
+	DomainID  types.Int64                     `tfsdk:"domain_id"`
+	Entries   map[string]IPListEntryValueModel `tfsdk:"entries"`
+	Exclusive types.Bool                      `tfsdk:"exclusive"`
+}
+
+type ipListV1ServiceWhitelist struct {
+	ServiceID   types.Int64                     `tfsdk:"service_id"`
+	Entries     map[string]IPListEntryValueModel `tfsdk:"entries"`
+	Exclusive   types.Bool                      `tfsdk:"exclusive"`
+	DefaultDrop types.Bool                      `tfsdk:"default_drop"`
+}
+
+type ipListV1ServiceBlacklist struct {
+	ServiceID types.Int64                     `tfsdk:"service_id"`
+	Entries   map[string]IPListEntryValueModel `tfsdk:"entries"`
+	Exclusive types.Bool                      `tfsdk:"exclusive"`
+}
+
+func (r *IPListResource) UpgradeState(_ context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: {
+			PriorSchema:   r.schemaV0(),
+			StateUpgrader: r.upgradeV0,
+		},
+	}
+}
+
+func (r *IPListResource) schemaV0() *schema.Schema {
+	attrs := map[string]schema.Attribute{
+		r.entity.idField(): schema.Int64Attribute{
+			Required: true,
+			PlanModifiers: []planmodifier.Int64{
+				int64planmodifier.RequiresReplace(),
+			},
+		},
+		"entries": schema.SetNestedAttribute{
+			Required: true,
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: map[string]schema.Attribute{
+					"ip":      schema.StringAttribute{Required: true},
+					"ttl":     schema.Int64Attribute{Optional: true, Computed: true},
+					"comment": schema.StringAttribute{Optional: true, Computed: true},
+				},
+			},
+		},
+	}
+	if r.kind == ipListWhitelist {
+		attrs["default_drop"] = schema.BoolAttribute{Optional: true, Computed: true}
+	}
+	return &schema.Schema{Attributes: attrs}
+}
+
+func oldEntriesToMap(entries []IPListEntryModel) map[string]IPListEntryValueModel {
+	m := make(map[string]IPListEntryValueModel, len(entries))
+	for _, e := range entries {
+		m[e.IP.ValueString()] = IPListEntryValueModel{TTL: e.TTL, Comment: e.Comment}
+	}
+	return m
+}
+
+func (r *IPListResource) upgradeV0(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	switch {
+	case r.entity == entityDomain && r.kind == ipListWhitelist:
+		var old ipListV0DomainWhitelist
+		resp.Diagnostics.Append(req.State.Get(ctx, &old)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(resp.State.Set(ctx, &ipListV1DomainWhitelist{
+			DomainID:    old.DomainID,
+			Entries:     oldEntriesToMap(old.Entries),
+			Exclusive:   types.BoolValue(true),
+			DefaultDrop: old.DefaultDrop,
+		})...)
+
+	case r.entity == entityDomain && r.kind == ipListBlacklist:
+		var old ipListV0DomainBlacklist
+		resp.Diagnostics.Append(req.State.Get(ctx, &old)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(resp.State.Set(ctx, &ipListV1DomainBlacklist{
+			DomainID:  old.DomainID,
+			Entries:   oldEntriesToMap(old.Entries),
+			Exclusive: types.BoolValue(true),
+		})...)
+
+	case r.entity == entityService && r.kind == ipListWhitelist:
+		var old ipListV0ServiceWhitelist
+		resp.Diagnostics.Append(req.State.Get(ctx, &old)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(resp.State.Set(ctx, &ipListV1ServiceWhitelist{
+			ServiceID:   old.ServiceID,
+			Entries:     oldEntriesToMap(old.Entries),
+			Exclusive:   types.BoolValue(true),
+			DefaultDrop: old.DefaultDrop,
+		})...)
+
+	case r.entity == entityService && r.kind == ipListBlacklist:
+		var old ipListV0ServiceBlacklist
+		resp.Diagnostics.Append(req.State.Get(ctx, &old)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(resp.State.Set(ctx, &ipListV1ServiceBlacklist{
+			ServiceID: old.ServiceID,
+			Entries:   oldEntriesToMap(old.Entries),
+			Exclusive: types.BoolValue(true),
+		})...)
+	}
 }

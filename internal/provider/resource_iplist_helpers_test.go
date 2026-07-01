@@ -155,43 +155,37 @@ func TestEntriesToAPITuples_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestIpEntryEqual(t *testing.T) {
+func TestEntryValueEqual(t *testing.T) {
 	tests := []struct {
 		name string
-		a, b IPListEntryModel
+		a, b IPListEntryValueModel
 		want bool
 	}{
 		{
 			"all same",
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("x")},
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("x")},
+			IPListEntryValueModel{TTL: types.Int64Value(0), Comment: types.StringValue("x")},
+			IPListEntryValueModel{TTL: types.Int64Value(0), Comment: types.StringValue("x")},
 			true,
 		},
 		{
-			"different ip",
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			IPListEntryModel{IP: types.StringValue("2.2.2.2"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			false,
-		},
-		{
 			"different ttl",
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(60), Comment: types.StringValue("")},
+			IPListEntryValueModel{TTL: types.Int64Value(0), Comment: types.StringValue("")},
+			IPListEntryValueModel{TTL: types.Int64Value(60), Comment: types.StringValue("")},
 			false,
 		},
 		{
 			"different comment",
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("a")},
-			IPListEntryModel{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("b")},
+			IPListEntryValueModel{TTL: types.Int64Value(0), Comment: types.StringValue("a")},
+			IPListEntryValueModel{TTL: types.Int64Value(0), Comment: types.StringValue("b")},
 			false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ipEntryEqual(&tt.a, &tt.b)
+			got := entryValueEqual(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("ipEntryEqual() = %v, want %v", got, tt.want)
+				t.Errorf("entryValueEqual() = %v, want %v", got, tt.want)
 			}
 		})
 	}

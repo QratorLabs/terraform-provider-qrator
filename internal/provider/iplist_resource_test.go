@@ -20,6 +20,17 @@ func ipListTuplesJSON(tuples [][]interface{}) json.RawMessage {
 	return json.RawMessage(b)
 }
 
+func makeDesired(entries map[string][2]interface{}) map[string]IPListEntryValueModel {
+	m := make(map[string]IPListEntryValueModel, len(entries))
+	for ip, v := range entries {
+		m[ip] = IPListEntryValueModel{
+			TTL:     types.Int64Value(v[0].(int64)),
+			Comment: types.StringValue(v[1].(string)),
+		}
+	}
+	return m
+}
+
 // ---------------------------------------------------------------------------
 // syncEntries
 // ---------------------------------------------------------------------------
@@ -34,11 +45,11 @@ func TestIPListSyncEntries(t *testing.T) {
 			On(apiPath, "whitelist_append", nil)
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
 
-		desired := []IPListEntryModel{
-			{IP: types.StringValue("1.2.3.4"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-		}
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), ""},
+		})
 		var d diag.Diagnostics
-		r.syncEntries(ctx, 10, desired, &d)
+		r.syncEntries(ctx, 10, nil, desired, false, &d)
 		if d.HasError() {
 			t.Fatal(d)
 		}
@@ -56,11 +67,11 @@ func TestIPListSyncEntries(t *testing.T) {
 			OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{{"1.2.3.4", int64(0), ""}}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
 
-		desired := []IPListEntryModel{
-			{IP: types.StringValue("1.2.3.4"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-		}
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), ""},
+		})
 		var d diag.Diagnostics
-		r.syncEntries(ctx, 11, desired, &d)
+		r.syncEntries(ctx, 11, desired, desired, false, &d)
 		if d.HasError() {
 			t.Fatal(d)
 		}
@@ -83,12 +94,16 @@ func TestIPListSyncEntries(t *testing.T) {
 			On(apiPath, "whitelist_append", nil)
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
 
-		desired := []IPListEntryModel{
-			{IP: types.StringValue("1.2.3.4"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			{IP: types.StringValue("5.5.5.5"), TTL: types.Int64Value(0), Comment: types.StringValue("new")},
-		}
+		prev := makeDesired(map[string][2]interface{}{
+			"9.9.9.9": {int64(0), "old"},
+			"1.2.3.4": {int64(0), ""},
+		})
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), ""},
+			"5.5.5.5": {int64(0), "new"},
+		})
 		var d diag.Diagnostics
-		r.syncEntries(ctx, 12, desired, &d)
+		r.syncEntries(ctx, 12, prev, desired, false, &d)
 		if d.HasError() {
 			t.Fatal(d)
 		}
@@ -100,27 +115,104 @@ func TestIPListSyncEntries(t *testing.T) {
 		}
 	})
 
-	t.Run("changed ttl — remove old entry, append updated", func(t *testing.T) {
-		apiPath := "/request/domain/13"
+	t.Run("UI-added entry not removed when not in config", func(t *testing.T) {
+		apiPath := "/request/domain/15"
 		mc := newMockClient().
-			OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{{"1.2.3.4", int64(3600), ""}})).
+			OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
+				{"1.2.3.4", int64(0), ""},
+				{"9.9.9.9", int64(0), "ui-added"},
+			}))
+		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
+
+		prev := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), ""},
+		})
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), ""},
+		})
+		var d diag.Diagnostics
+		r.syncEntries(ctx, 15, prev, desired, false, &d)
+		if d.HasError() {
+			t.Fatal(d)
+		}
+		if n := len(mc.CallsFor(apiPath, "whitelist_remove")); n != 0 {
+			t.Errorf("expected 0 remove calls (UI entry must not be removed), got %d", n)
+		}
+		if n := len(mc.CallsFor(apiPath, "whitelist_append")); n != 0 {
+			t.Errorf("expected 0 append calls, got %d", n)
+		}
+	})
+
+	t.Run("changed comment, ttl=0 — remove then append", func(t *testing.T) {
+		apiPath := "/request/domain/16"
+		mc := newMockClient().
+			OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{{"1.2.3.4", int64(0), "old"}})).
 			On(apiPath, "whitelist_remove", nil).
 			On(apiPath, "whitelist_append", nil)
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
 
-		desired := []IPListEntryModel{
-			{IP: types.StringValue("1.2.3.4"), TTL: types.Int64Value(7200), Comment: types.StringValue("")},
-		}
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), "new"},
+		})
 		var d diag.Diagnostics
-		r.syncEntries(ctx, 13, desired, &d)
+		r.syncEntries(ctx, 16, nil, desired, false, &d)
 		if d.HasError() {
 			t.Fatal(d)
 		}
 		if n := len(mc.CallsFor(apiPath, "whitelist_remove")); n != 1 {
-			t.Errorf("expected 1 remove, got %d", n)
+			t.Errorf("expected 1 remove (ttl=0 can't overwrite in-place), got %d", n)
 		}
 		if n := len(mc.CallsFor(apiPath, "whitelist_append")); n != 1 {
 			t.Errorf("expected 1 append, got %d", n)
+		}
+	})
+
+	t.Run("changed ttl, existing ttl!=0 — append only, no remove", func(t *testing.T) {
+		apiPath := "/request/domain/13"
+		mc := newMockClient().
+			OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{{"1.2.3.4", int64(3600), ""}})).
+			On(apiPath, "whitelist_append", nil)
+		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
+
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(7200), ""},
+		})
+		var d diag.Diagnostics
+		r.syncEntries(ctx, 13, nil, desired, false, &d)
+		if d.HasError() {
+			t.Fatal(d)
+		}
+		if n := len(mc.CallsFor(apiPath, "whitelist_remove")); n != 0 {
+			t.Errorf("expected 0 removes (existing ttl!=0, append overwrites), got %d", n)
+		}
+		if n := len(mc.CallsFor(apiPath, "whitelist_append")); n != 1 {
+			t.Errorf("expected 1 append, got %d", n)
+		}
+	})
+
+	t.Run("exclusive=true removes UI-added entry", func(t *testing.T) {
+		apiPath := "/request/domain/17"
+		mc := newMockClient().
+			OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
+				{"1.2.3.4", int64(0), ""},
+				{"9.9.9.9", int64(0), "ui-added"},
+			})).
+			On(apiPath, "whitelist_remove", nil)
+		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
+
+		desired := makeDesired(map[string][2]interface{}{
+			"1.2.3.4": {int64(0), ""},
+		})
+		var d diag.Diagnostics
+		r.syncEntries(ctx, 17, nil, desired, true, &d)
+		if d.HasError() {
+			t.Fatal(d)
+		}
+		if n := len(mc.CallsFor(apiPath, "whitelist_remove")); n != 1 {
+			t.Errorf("expected 1 remove (exclusive mode), got %d", n)
+		}
+		if n := len(mc.CallsFor(apiPath, "whitelist_append")); n != 0 {
+			t.Errorf("expected 0 appends, got %d", n)
 		}
 	})
 
@@ -129,7 +221,7 @@ func TestIPListSyncEntries(t *testing.T) {
 		mc := newMockClient().OnError(apiPath, "whitelist_get", fmt.Errorf("network error"))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
 		var d diag.Diagnostics
-		r.syncEntries(ctx, 14, nil, &d)
+		r.syncEntries(ctx, 14, nil, nil, false, &d)
 		if !d.HasError() {
 			t.Error("expected error diagnostic")
 		}
@@ -142,11 +234,11 @@ func TestIPListSyncEntries(t *testing.T) {
 			On(apiPath, "blacklist_append", nil)
 		r := &IPListResource{client: mc, entity: entityService, kind: ipListBlacklist}
 
-		desired := []IPListEntryModel{
-			{IP: types.StringValue("8.8.8.8"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-		}
+		desired := makeDesired(map[string][2]interface{}{
+			"8.8.8.8": {int64(0), ""},
+		})
 		var d diag.Diagnostics
-		r.syncEntries(ctx, 99, desired, &d)
+		r.syncEntries(ctx, 99, nil, desired, false, &d)
 		if d.HasError() {
 			t.Fatal(d)
 		}
@@ -163,34 +255,34 @@ func TestIPListSyncEntries(t *testing.T) {
 func TestIPListReadAndReconcile(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("preserves state order, updates values from API", func(t *testing.T) {
+	t.Run("returns API values for managed IPs", func(t *testing.T) {
 		apiPath := "/request/domain/20"
 		mc := newMockClient().OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
 			{"10.0.0.2", int64(0), "b"},
 			{"10.0.0.1", int64(0), "a"},
 		}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
-		state := []IPListEntryModel{
-			{IP: types.StringValue("10.0.0.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			{IP: types.StringValue("10.0.0.2"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-		}
-		var d diag.Diagnostics
-		got, err := r.readAndReconcile(ctx, 20, state, &d)
+		desired := makeDesired(map[string][2]interface{}{
+			"10.0.0.1": {int64(0), ""},
+			"10.0.0.2": {int64(0), ""},
+		})
+		got, err := r.readAndReconcile(ctx, 20, desired, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		// State order preserved; API comment values used.
-		want := []string{"10.0.0.1", "10.0.0.2"}
-		if len(got) != len(want) {
-			t.Fatalf("expected %d entries, got %d", len(want), len(got))
+		wantComments := map[string]string{"10.0.0.1": "a", "10.0.0.2": "b"}
+		if len(got) != len(wantComments) {
+			t.Fatalf("expected %d entries, got %d", len(wantComments), len(got))
 		}
-		for i, ip := range want {
-			if got[i].IP.ValueString() != ip {
-				t.Errorf("pos %d: expected %s, got %s", i, ip, got[i].IP.ValueString())
+		for ip, wantComment := range wantComments {
+			e, ok := got[ip]
+			if !ok {
+				t.Errorf("missing IP %s", ip)
+				continue
 			}
-		}
-		if got[0].Comment.ValueString() != "a" || got[1].Comment.ValueString() != "b" {
-			t.Errorf("expected comments [a b], got [%s %s]", got[0].Comment.ValueString(), got[1].Comment.ValueString())
+			if e.Comment.ValueString() != wantComment {
+				t.Errorf("IP %s: expected comment %q, got %q", ip, wantComment, e.Comment.ValueString())
+			}
 		}
 	})
 
@@ -200,43 +292,42 @@ func TestIPListReadAndReconcile(t *testing.T) {
 			{"1.1.1.1", int64(0), ""},
 		}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
-		state := []IPListEntryModel{
-			{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			{IP: types.StringValue("2.2.2.2"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-		}
-		var d diag.Diagnostics
-		got, err := r.readAndReconcile(ctx, 21, state, &d)
+		desired := makeDesired(map[string][2]interface{}{
+			"1.1.1.1": {int64(0), ""},
+			"2.2.2.2": {int64(0), ""},
+		})
+		got, err := r.readAndReconcile(ctx, 21, desired, false)
 		if err != nil || len(got) != 1 {
 			t.Fatalf("got len=%d, err=%v", len(got), err)
 		}
-		if got[0].IP.ValueString() != "1.1.1.1" {
-			t.Errorf("got %v", got)
+		if _, ok := got["1.1.1.1"]; !ok {
+			t.Errorf("expected 1.1.1.1 in result, got %v", got)
 		}
 	})
 
-	t.Run("new API entry appended after existing state entries", func(t *testing.T) {
+	t.Run("UI-added API entry not included in result", func(t *testing.T) {
 		apiPath := "/request/domain/22"
 		mc := newMockClient().OnRaw(apiPath, "whitelist_get", ipListTuplesJSON([][]interface{}{
 			{"1.1.1.1", int64(0), ""},
-			{"2.2.2.2", int64(0), "new"},
+			{"2.2.2.2", int64(0), "ui-added"},
 			{"3.3.3.3", int64(0), ""},
 		}))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
-		// State has 1.1.1.1 and 3.3.3.3; 2.2.2.2 is new from API — appended at end.
-		state := []IPListEntryModel{
-			{IP: types.StringValue("1.1.1.1"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
-			{IP: types.StringValue("3.3.3.3"), TTL: types.Int64Value(0), Comment: types.StringValue("")},
+		desired := makeDesired(map[string][2]interface{}{
+			"1.1.1.1": {int64(0), ""},
+			"3.3.3.3": {int64(0), ""},
+		})
+		got, err := r.readAndReconcile(ctx, 22, desired, false)
+		if err != nil || len(got) != 2 {
+			t.Fatalf("got len=%d, err=%v (expected 2, UI entry must be excluded)", len(got), err)
 		}
-		var d diag.Diagnostics
-		got, err := r.readAndReconcile(ctx, 22, state, &d)
-		if err != nil || len(got) != 3 {
-			t.Fatalf("got len=%d, err=%v", len(got), err)
-		}
-		want := []string{"1.1.1.1", "3.3.3.3", "2.2.2.2"}
-		for i, ip := range want {
-			if got[i].IP.ValueString() != ip {
-				t.Errorf("pos %d: expected %s, got %s", i, ip, got[i].IP.ValueString())
+		for _, ip := range []string{"1.1.1.1", "3.3.3.3"} {
+			if _, ok := got[ip]; !ok {
+				t.Errorf("expected IP %s in result", ip)
 			}
+		}
+		if _, ok := got["2.2.2.2"]; ok {
+			t.Error("UI-added 2.2.2.2 must not appear in result")
 		}
 	})
 
@@ -244,8 +335,7 @@ func TestIPListReadAndReconcile(t *testing.T) {
 		apiPath := "/request/domain/23"
 		mc := newMockClient().OnError(apiPath, "whitelist_get", fmt.Errorf("timeout"))
 		r := &IPListResource{client: mc, entity: entityDomain, kind: ipListWhitelist}
-		var d diag.Diagnostics
-		_, err := r.readAndReconcile(ctx, 23, nil, &d)
+		_, err := r.readAndReconcile(ctx, 23, nil, false)
 		if err == nil {
 			t.Error("expected error")
 		}

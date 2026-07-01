@@ -122,23 +122,17 @@ resource "qrator_service_sni" "example" {
 resource "qrator_service_whitelist" "example" {
   service_id = qrator_service.example.id
 
-  entries = [
-    {
-      ip      = "203.0.113.10"
-      comment = "Office gateway"
-    },
-  ]
+  entries = {
+    "203.0.113.10" = { comment = "Office gateway" }
+  }
 }
 
 resource "qrator_service_blacklist" "example" {
   service_id = qrator_service.example.id
 
-  entries = [
-    {
-      ip      = "192.0.2.100"
-      comment = "Known attacker"
-    },
-  ]
+  entries = {
+    "192.0.2.100" = { comment = "Known attacker" }
+  }
 }
 
 # --- Certificate (referenced by SNI) ---

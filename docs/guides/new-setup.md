@@ -124,7 +124,7 @@ resource "qrator_domain_whitelist" "example" {
   domain_id    = qrator_domain.example.id
   default_drop = false
 
-  entries = []
+  entries = {}
 }
 ```
 
@@ -198,7 +198,7 @@ resource "qrator_service_services" "example" {
 
 resource "qrator_service_whitelist" "example" {
   service_id = qrator_service.example.id
-  entries    = []
+  entries    = {}
 }
 ```
 

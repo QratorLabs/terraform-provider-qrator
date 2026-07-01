@@ -116,28 +116,18 @@ resource "qrator_domain_whitelist" "example" {
   domain_id    = qrator_domain.example.id
   default_drop = true
 
-  entries = [
-    {
-      ip      = "203.0.113.10"
-      comment = "Office gateway"
-    },
-    {
-      ip      = "198.51.100.1"
-      ttl     = 3600
-      comment = "Temporary access"
-    },
-  ]
+  entries = {
+    "203.0.113.10" = { comment = "Office gateway" }
+    "198.51.100.1" = { comment = "Temporary access", ttl = 3600 }
+  }
 }
 
 resource "qrator_domain_blacklist" "example" {
   domain_id = qrator_domain.example.id
 
-  entries = [
-    {
-      ip      = "192.0.2.100"
-      comment = "Known attacker"
-    },
-  ]
+  entries = {
+    "192.0.2.100" = { comment = "Known attacker" }
+  }
 }
 
 # --- Domain redirects ---
