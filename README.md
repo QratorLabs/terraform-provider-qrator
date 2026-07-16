@@ -82,11 +82,10 @@ See the [`examples/`](examples/) directory for complete configurations.
 
 ## Troubleshooting
 
-Set `QRATOR_LOG_REQUESTS=1` to print every API call to stderr:
+Set `QRATOR_LOG_REQUESTS=1` together with `TF_LOG=INFO` to print every API request and its ID to stderr:
 
 ```shell
-export QRATOR_LOG_REQUESTS=1
-terraform apply
+TF_LOG=INFO QRATOR_LOG_REQUESTS=1 terraform apply
 ```
 
 Output format (one line per request):

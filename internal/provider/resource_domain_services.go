@@ -1036,7 +1036,7 @@ func apiToHTTPModel(e *apiServiceEntry) DomainServiceHTTPModel {
 		Port:        types.Int64Value(ptrInt64(e.Port)),
 		SSL:         optionalBool(e.SSL),
 		HTTP2:       optionalBool(e.HTTP2),
-		DefaultDrop: optionalBool(e.DefaultDrop),
+		DefaultDrop: defaultBool(e.DefaultDrop, false),
 	}
 
 	if e.Upstream != nil {
@@ -1069,7 +1069,7 @@ func apiToNATModel(e *apiServiceEntry) DomainServiceNATModel {
 		ID:          optionalInt64(e.ID),
 		Port:        types.Int64Value(ptrInt64(e.Port)),
 		Proto:       types.StringValue(proto),
-		DefaultDrop: optionalBool(e.DefaultDrop),
+		DefaultDrop: defaultBool(e.DefaultDrop, false),
 		DropAmp:     optionalBool(e.DropAmp),
 		RateLimit:   optionalInt64(e.RateLimit),
 	}
@@ -1090,7 +1090,7 @@ func apiToNATAllModel(e *apiServiceEntry) DomainServiceNATAllModel {
 	m := DomainServiceNATAllModel{
 		ID:          optionalInt64(e.ID),
 		Proto:       types.StringValue(proto),
-		DefaultDrop: optionalBool(e.DefaultDrop),
+		DefaultDrop: defaultBool(e.DefaultDrop, false),
 		DropAmp:     optionalBool(e.DropAmp),
 		RateLimit:   optionalInt64(e.RateLimit),
 	}
@@ -1128,7 +1128,7 @@ func apiToWSModel(e *apiServiceEntry) DomainServiceWSModel {
 		ID:          optionalInt64(e.ID),
 		Port:        types.Int64Value(ptrInt64(e.Port)),
 		SSL:         optionalBool(e.SSL),
-		DefaultDrop: optionalBool(e.DefaultDrop),
+		DefaultDrop: defaultBool(e.DefaultDrop, false),
 	}
 
 	if e.Upstream != nil {
@@ -1329,7 +1329,7 @@ func httpWSUpstreamsFromAPI(items []apiHTTPWSUpstreamItem) []DomainUpstreamServe
 			Port:   types.Int64Value(s.Port),
 			Weight: types.Int64Value(s.Weight),
 			Type:   types.StringValue(s.Type),
-			Name:   types.StringValue(s.Name),
+			Name:   optionalString(s.Name),
 		}
 		if s.IP != nil {
 			m.IP = types.StringValue(*s.IP)
@@ -1356,7 +1356,7 @@ func tcpProxyUpstreamsFromAPI(items []apiTCPProxyUpstreamItem) []DomainUpstreamS
 			Port:      types.Int64Value(s.Port),
 			Weight:    types.Int64Value(s.Weight),
 			Type:      types.StringValue(s.Type),
-			Name:      types.StringValue(s.Name),
+			Name:      optionalString(s.Name),
 		}
 	}
 	return models
@@ -1385,6 +1385,21 @@ func optionalBool(p *bool) types.Bool {
 		return types.BoolNull()
 	}
 	return types.BoolValue(*p)
+}
+
+// defaultBool returns the provided default when the API returns nil.
+func defaultBool(p *bool, def bool) types.Bool {
+	if p == nil {
+		return types.BoolValue(def)
+	}
+	return types.BoolValue(*p)
+}
+
+func optionalString(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
 }
 
 func boolPtr(v types.Bool) *bool {
