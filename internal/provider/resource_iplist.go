@@ -178,16 +178,18 @@ func (r *IPListResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	r.syncEntries(ctx, entityID.ValueInt64(), nil, entries, exclusive.ValueBool(), &resp.Diagnostics)
+	planned := entries
+	r.syncEntries(ctx, entityID.ValueInt64(), nil, planned, exclusive.ValueBool(), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, exclusive.ValueBool())
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), planned, exclusive.ValueBool())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries after create", err.Error())
 		return
 	}
+	fillMissingFromDesired(entries, planned)
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
@@ -223,6 +225,12 @@ func (r *IPListResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("exclusive"), &exclusive)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// After import, exclusive is null (only entity ID is set by ImportState).
+	// Default to true to match the schema default and avoid returning an empty
+	// entries map from readAndReconcile in non-exclusive mode.
+	if exclusive.IsNull() {
+		exclusive = types.BoolValue(true)
 	}
 
 	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), stateEntries, exclusive.ValueBool())
@@ -279,16 +287,18 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	r.syncEntries(ctx, entityID.ValueInt64(), stateEntries, entries, exclusive.ValueBool(), &resp.Diagnostics)
+	planned := entries
+	r.syncEntries(ctx, entityID.ValueInt64(), stateEntries, planned, exclusive.ValueBool(), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), entries, exclusive.ValueBool())
+	entries, err := r.readAndReconcile(ctx, entityID.ValueInt64(), planned, exclusive.ValueBool())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to read entries after update", err.Error())
 		return
 	}
+	fillMissingFromDesired(entries, planned)
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(r.entity.idField()), entityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("entries"), entries)...)
@@ -490,6 +500,18 @@ func entriesToAPITuples(entries []IPListEntryModel) [][]interface{} {
 		}
 	}
 	return tuples
+}
+
+// fillMissingFromDesired ensures every desired entry is present in result.
+// If readAndReconcile didn't return an entry we just synced (API propagation
+// delay or race), fall back to the desired values so Terraform doesn't report
+// "element has vanished". The next Read will correct any remaining discrepancy.
+func fillMissingFromDesired(result, desired map[string]IPListEntryValueModel) {
+	for ip, de := range desired {
+		if _, ok := result[ip]; !ok {
+			result[ip] = de
+		}
+	}
 }
 
 func entryValueEqual(a, b IPListEntryValueModel) bool {
