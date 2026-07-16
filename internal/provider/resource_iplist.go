@@ -333,21 +333,37 @@ func (r *IPListResource) Update(ctx context.Context, req resource.UpdateRequest,
 func (r *IPListResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var entityID types.Int64
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(r.entity.idField()), &entityID)...)
+	var exclusive types.Bool
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("exclusive"), &exclusive)...)
+	var stateEntries map[string]IPListEntryValueModel
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("entries"), &stateEntries)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	apiPath := r.entity.apiPath(entityID.ValueInt64())
 
-	if r.kind == ipListWhitelist {
-		if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{"accept"}); err != nil {
-			tflog.Warn(ctx, fmt.Sprintf("Failed to reset not_whitelisted_policy: %s", err))
+	if exclusive.IsNull() || exclusive.ValueBool() {
+		// Exclusive mode: TF owns the entire list — flush everything.
+		if r.kind == ipListWhitelist {
+			if _, err := r.client.MakeRequest(ctx, apiPath, "not_whitelisted_policy_set", []interface{}{"accept"}); err != nil {
+				tflog.Warn(ctx, fmt.Sprintf("Failed to reset not_whitelisted_policy: %s", err))
+			}
 		}
-	}
-
-	if _, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodFlush(), nil); err != nil {
-		resp.Diagnostics.AddError("Failed to flush entries", err.Error())
-		return
+		if _, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodFlush(), nil); err != nil {
+			resp.Diagnostics.AddError("Failed to flush entries", err.Error())
+		}
+	} else {
+		// Additive mode: only remove the IPs that Terraform was managing.
+		ips := make([]string, 0, len(stateEntries))
+		for ip := range stateEntries {
+			ips = append(ips, ip)
+		}
+		if len(ips) > 0 {
+			if _, err := r.client.MakeRequest(ctx, apiPath, r.kind.methodRemove(), ips); err != nil {
+				resp.Diagnostics.AddError("Failed to remove entries", err.Error())
+			}
+		}
 	}
 }
 
