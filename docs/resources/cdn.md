@@ -85,7 +85,7 @@ terraform import qrator_cdn.example 12345
 - `blocked_uri` (Block List) List of URI patterns to block. Each entry specifies a regex pattern and an HTTP response code.
 - `cache_errors` (Block List) Cache error responses from upstream. If upstream returns a matching status code, the next request for the same resource is delayed by the specified timeout (ms). See [Nested Schema for `cache_errors`](#nested-schema-for-cache_errors) for allowed values.
 - `client_no_cache` (Boolean) If enabled, no cache headers beside cache-control: no-cache are sent to client.
-- `compress_disabled` (List of String) List of compression algorithms to disable. Allowed values: `gzip`, `deflate`, `br`.
+- `compress_disabled` (List of String) List of compression algorithms CDN must NOT use. Allowed values: `gzip`, `deflate`, `br`, `zstd`. Algorithms not listed compress any MIME type. Backed by the Qrator content_compression API (CdnContentCompression): an algorithm counts as disabled when its MIME list is empty.
 - `http2` (Boolean) Enable CDN support for HTTP/2 (in addition to HTTP/1.1).
 - `tls_versions` (List of String) Allowed TLS protocol versions for CDN client connections. Valid values: `TLSv1.0`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3`. Must include at least one of `TLSv1.2` or `TLSv1.3`.
 - `webp` (Number) WebP image compression quality (0-100). `0` disables conversion, `1`-`100` enables on-the-fly conversion of images to WebP format with the specified quality.
