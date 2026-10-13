@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/qratorlabs/terraform-provider-qrator/internal/client"
 	"golang.org/x/sync/errgroup"
@@ -169,7 +170,9 @@ func (r *CDNResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				},
 			},
 			"compress_disabled": schema.ListAttribute{
-				Description: "List of compression algorithms to disable. Allowed values: gzip, deflate, br.",
+				Description: "List of compression algorithms CDN must NOT use. Allowed values: gzip, deflate, br, zstd. " +
+					"Algorithms not listed compress any MIME type. Backed by the Qrator content_compression API " +
+					"(CdnContentCompression): an algorithm counts as disabled when its MIME list is empty.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
@@ -572,12 +575,13 @@ func (r *CDNResource) applyPlanToAPI(ctx context.Context, apiPath string, plan, 
 		}
 	}
 
-	// compress_disabled
+	// compress_disabled -> content_compression (Qrator removed the compress_disabled_* methods)
 	if !IsNullOrUnknown(plan.CompressDisabled) &&
 		ShouldUpdateList(plan.CompressDisabled, state.CompressDisabled, true) {
 		var values []string
 		plan.CompressDisabled.ElementsAs(ctx, &values, false)
-		if _, err := r.client.MakeRequest(ctx, apiPath, "compress_disabled_set", values); err != nil {
+		payload := contentCompressionFromDisabled(values)
+		if _, err := r.client.MakeRequest(ctx, apiPath, "content_compression_set", payload); err != nil {
 			diags.AddError("Failed to update compress_disabled", err.Error())
 			return false
 		}
@@ -641,8 +645,8 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 		webp                     int64
 		upstreamHeaders          []string
 		http2                    bool
-		cacheErrors      []cdnCacheErrorEntry
-		compressDisabled []string
+		cacheErrors              []cdnCacheErrorEntry
+		compressDisabled         []string
 		blockedURIEntries        []cdnBlockedURIEntry
 		whiteURI                 []string
 		tlsVersions              []string
@@ -738,11 +742,16 @@ func (r *CDNResource) readCDNModel(ctx context.Context, domainID int64, ref CDNM
 	})
 
 	g.Go(func() error {
-		v, err := r.client.MakeRequest(gctx, apiPath, "compress_disabled_get", nil)
+		v, err := r.client.MakeRequest(gctx, apiPath, "content_compression_get", nil)
 		if err != nil {
 			return err
 		}
-		return json.Unmarshal(v, &compressDisabled)
+		var cc apiContentCompression
+		if err := json.Unmarshal(v, &cc); err != nil {
+			return err
+		}
+		compressDisabled = cc.disabledAlgos()
+		return nil
 	})
 
 	g.Go(func() error {
@@ -947,6 +956,65 @@ type apiCacheQueryParams struct {
 	Params []string `json:"params"`
 }
 
+// cdnCompressAlgos is the fixed set of compression algorithms exposed by the
+// Qrator content_compression API (CdnContentCompression), in a stable order.
+var cdnCompressAlgos = []string{"gzip", "deflate", "br", "zstd"}
+
+// apiContentCompression is the wire format for content_compression_get/set
+// (API type CdnContentCompression). Each field lists the MIME types CDN compresses
+// with that algorithm: an empty list disables the algorithm, ["*"] matches any MIME.
+// It replaces the removed compress_disabled_get/set methods.
+type apiContentCompression struct {
+	Gzip    []string `json:"gzip"`
+	Br      []string `json:"br"`
+	Deflate []string `json:"deflate"`
+	Zstd    []string `json:"zstd"`
+}
+
+func (c apiContentCompression) byAlgo() map[string][]string {
+	return map[string][]string{
+		"gzip":    c.Gzip,
+		"deflate": c.Deflate,
+		"br":      c.Br,
+		"zstd":    c.Zstd,
+	}
+}
+
+// disabledAlgos projects CdnContentCompression onto the legacy compress_disabled
+// list: the algorithms whose MIME list is empty, in cdnCompressAlgos order.
+func (c apiContentCompression) disabledAlgos() []string {
+	byAlgo := c.byAlgo()
+	disabled := make([]string, 0, len(cdnCompressAlgos))
+	for _, a := range cdnCompressAlgos {
+		if len(byAlgo[a]) == 0 {
+			disabled = append(disabled, a)
+		}
+	}
+	return disabled
+}
+
+// contentCompressionFromDisabled builds a CdnContentCompression payload from the
+// legacy compress_disabled list: listed algorithms are disabled (empty MIME list),
+// every other algorithm compresses any MIME type (["*"]).
+func contentCompressionFromDisabled(disabled []string) apiContentCompression {
+	off := make(map[string]bool, len(disabled))
+	for _, a := range disabled {
+		off[strings.ToLower(strings.TrimSpace(a))] = true
+	}
+	mimes := func(algo string) []string {
+		if off[algo] {
+			return []string{}
+		}
+		return []string{"*"}
+	}
+	return apiContentCompression{
+		Gzip:    mimes("gzip"),
+		Deflate: mimes("deflate"),
+		Br:      mimes("br"),
+		Zstd:    mimes("zstd"),
+	}
+}
+
 // updateCacheErrors calls the specified API method if the cache errors configuration has changed.
 func (r *CDNResource) updateCacheErrors(ctx context.Context, apiPath, method string, plan, state types.List, diags *diag.Diagnostics) error {
 	var planEntries, stateEntries []CDNCacheErrorEntryModel
@@ -1028,7 +1096,6 @@ func cacheErrorModelsToList(ctx context.Context, models []CDNCacheErrorEntryMode
 	diags.Append(d...)
 	return list
 }
-
 
 // cdnBlockedURIEntry represents the API structure for a CDN blocked URI entry.
 type cdnBlockedURIEntry struct {
@@ -1117,7 +1184,6 @@ func blockedURIModelsToList(ctx context.Context, models []CDNBlockedURIEntryMode
 	diags.Append(d...)
 	return list
 }
-
 
 // parseCacheControl converts the API response for cache_control_get into a
 // normalised string for the Terraform state: "cdn", "origin", or a numeric
