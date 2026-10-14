@@ -13,19 +13,17 @@ type CDNModel struct {
 	RedirectCode             types.Int64  `tfsdk:"redirect_code"`
 
 	CacheQueryParams types.Object `tfsdk:"cache_query_params"`
-	ClientHeaders     types.List   `tfsdk:"client_headers"`
-	ClientIPHeader    types.String `tfsdk:"client_ip_header"`
+	ClientHeaders    types.List   `tfsdk:"client_headers"`
+	ClientIPHeader   types.String `tfsdk:"client_ip_header"`
 
 	UpstreamHeaders types.List `tfsdk:"upstream_headers"`
 
-	ClientNoCache types.Bool `tfsdk:"client_no_cache"`
-	HTTP2         types.Bool `tfsdk:"http2"`
+	HTTP2 types.Bool `tfsdk:"http2"`
 
-	CacheErrors      types.List `tfsdk:"cache_errors"`
-	CompressDisabled types.List `tfsdk:"compress_disabled"`
+	CacheErrors        types.List   `tfsdk:"cache_errors"`
+	ContentCompression types.Object `tfsdk:"content_compression"`
 
-	BlockedURI types.List `tfsdk:"blocked_uri"`
-	WhiteURI   types.List `tfsdk:"white_uri"`
+	AccessFilter types.Object `tfsdk:"access_filter"`
 
 	WebP types.Int64 `tfsdk:"webp"`
 
@@ -46,7 +44,8 @@ type CDNCacheQueryParamsModel struct {
 	Params types.List   `tfsdk:"params"`
 }
 
-// CDNBlockedURIEntryModel defines the model for a CDN blocked URI entry.
+// CDNBlockedURIEntryModel defines the model for a blocked_uri entry of the
+// qrator_cdn schema v1 (replaced by access_filter.uri.deny in v2).
 type CDNBlockedURIEntryModel struct {
 	URI  types.String `tfsdk:"uri"`
 	Code types.Int64  `tfsdk:"code"`

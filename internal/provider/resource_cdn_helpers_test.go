@@ -125,37 +125,3 @@ func TestCacheErrorEntriesEqual(t *testing.T) {
 		})
 	}
 }
-
-func TestBlockedURIEntriesEqual(t *testing.T) {
-	tests := []struct {
-		name string
-		a, b []CDNBlockedURIEntryModel
-		want bool
-	}{
-		{"both empty", nil, nil, true},
-		{"same", []CDNBlockedURIEntryModel{
-			{URI: types.StringValue("/admin"), Code: types.Int64Value(403)},
-		}, []CDNBlockedURIEntryModel{
-			{URI: types.StringValue("/admin"), Code: types.Int64Value(403)},
-		}, true},
-		{"different uri", []CDNBlockedURIEntryModel{
-			{URI: types.StringValue("/admin"), Code: types.Int64Value(403)},
-		}, []CDNBlockedURIEntryModel{
-			{URI: types.StringValue("/secret"), Code: types.Int64Value(403)},
-		}, false},
-		{"different code", []CDNBlockedURIEntryModel{
-			{URI: types.StringValue("/admin"), Code: types.Int64Value(403)},
-		}, []CDNBlockedURIEntryModel{
-			{URI: types.StringValue("/admin"), Code: types.Int64Value(404)},
-		}, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := blockedURIEntriesEqual(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("blockedURIEntriesEqual() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}

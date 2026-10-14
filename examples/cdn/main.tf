@@ -42,14 +42,18 @@ resource "qrator_cdn" "example" {
     mode   = "ignore"
     params = ["utm_source", "utm_medium"]
   }
-  client_no_cache = false
-  redirect_code       = 301
+  redirect_code = 301
 
   client_headers   = ["X-Custom-Header:value"]
   client_ip_header = "X-Real-IP"
   upstream_headers = ["X-CDN-Service:Qrator"]
 
-  compress_disabled = ["br"]
+  content_compression = {
+    gzip    = ["text/html", "text/css", "application/javascript", "application/json"]
+    br      = ["*"]
+    deflate = []
+    zstd    = []
+  }
 
   cache_errors = [
     {
@@ -58,14 +62,24 @@ resource "qrator_cdn" "example" {
     },
   ]
 
-  blocked_uri = [
-    {
-      uri  = "/admin/.*"
-      code = 403
-    },
-  ]
+  # Omit access_filter to leave the filter unmanaged by Terraform.
+  access_filter = {
+    skip_ips = ["203.0.113.0/24"]
 
-  white_uri = ["/api/.*", "/static/.*"]
+    geo    = { deny = ["CN"], deny_status_code = 451 }
+    method = { allow = ["GET", "HEAD", "POST"], allow_status_code = 405 }
+
+    uri = {
+      allow             = ["^/api/", "^/static/"]
+      allow_status_code = 404
+      deny              = [{ regex = "^/api/internal/", status_code = 404 }]
+    }
+
+    user_agent = {
+      deny        = [{ regex = "^BadBot", status_code = 429 }]
+      block_empty = true
+    }
+  }
 
   webp         = 80
   tls_versions = ["TLSv1.2", "TLSv1.3"]

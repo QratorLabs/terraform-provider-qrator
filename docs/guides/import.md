@@ -175,6 +175,8 @@ resource "qrator_cdn" "example" {
 }
 ```
 
+The access filter (`access_filter`) and content compression (`content_compression`) are not imported: they stay unmanaged until you add them to the configuration. If you do, the first `terraform plan` after the import shows them being added; `terraform apply` writes the configured values to Qrator. Describe them exactly as they are in the Qrator dashboard if you do not want them to change.
+
 ---
 
 ### `qrator_cdn_sni`
