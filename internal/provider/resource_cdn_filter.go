@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -37,6 +39,44 @@ type apiCdnFilter struct {
 
 type apiFilterSkip struct {
 	IP []string `json:"ip"`
+}
+
+// The API may encode an empty filter section as an empty JSON array ([])
+// instead of an object or null, although the CdnFilter schema declares every
+// section as object|null. The UnmarshalJSON methods below accept [] and
+// treat it as an empty section.
+
+// isEmptyJSONArray reports whether data is an empty JSON array, ignoring
+// whitespace.
+func isEmptyJSONArray(data []byte) bool {
+	return string(bytes.Join(bytes.Fields(data), nil)) == "[]"
+}
+
+func (s *apiFilterSkip) UnmarshalJSON(data []byte) error {
+	if isEmptyJSONArray(data) {
+		*s = apiFilterSkip{}
+		return nil
+	}
+	type plain apiFilterSkip
+	return json.Unmarshal(data, (*plain)(s))
+}
+
+func (r *apiFilterStringRules) UnmarshalJSON(data []byte) error {
+	if isEmptyJSONArray(data) {
+		*r = apiFilterStringRules{}
+		return nil
+	}
+	type plain apiFilterStringRules
+	return json.Unmarshal(data, (*plain)(r))
+}
+
+func (r *apiFilterRegexRules) UnmarshalJSON(data []byte) error {
+	if isEmptyJSONArray(data) {
+		*r = apiFilterRegexRules{}
+		return nil
+	}
+	type plain apiFilterRegexRules
+	return json.Unmarshal(data, (*plain)(r))
 }
 
 // apiFilterStringRules is the shape of the geo, ip and method sections.
