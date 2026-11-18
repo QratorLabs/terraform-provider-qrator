@@ -213,16 +213,25 @@ func (r *DomainRedirectsResource) Configure(ctx context.Context, req resource.Co
 // ---------------------------------------------------------------------------
 
 func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var model DomainRedirectsResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &model)...)
+	// Read the list as a framework value: it may be unknown (e.g. fed from a
+	// module variable or for_each) and cannot be decoded into a Go slice then.
+	var redirects types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("redirects"), &redirects)...)
+	if resp.Diagnostics.HasError() || redirects.IsNull() || redirects.IsUnknown() {
+		return
+	}
+
+	// Elements with unknown nested values are skipped (nil) and validated later,
+	// once Terraform knows them; indexes stay aligned with the list.
+	rules := decodeFullyKnownElems[DomainRedirectModel](ctx, redirects, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if len(model.Redirects) > 70 {
+	if len(rules) > 70 {
 		resp.Diagnostics.AddAttributeError(path.Root("redirects"),
 			"Too many redirect rules",
-			fmt.Sprintf("Maximum 70 redirect rules allowed; got %d.", len(model.Redirects)))
+			fmt.Sprintf("Maximum 70 redirect rules allowed; got %d.", len(rules)))
 		return
 	}
 
@@ -231,10 +240,12 @@ func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resour
 	//   "only one 'default' per port" — at most one uri=null rule per port
 	anyHostnamePerPort := make(map[int64]int) // port → count of hostname=any rules
 	defaultURIPerPort := make(map[int64]int)  // port → count of uri=null rules
-	seen := make(map[string]bool, len(model.Redirects))
+	seen := make(map[string]bool, len(rules))
 
-	for i := range model.Redirects {
-		e := &model.Redirects[i]
+	for i, e := range rules {
+		if e == nil {
+			continue
+		}
 
 		// hostname.type="fqdn" requires a non-empty value.
 		// Skip if value is unknown (computed attribute — will be validated at apply time).

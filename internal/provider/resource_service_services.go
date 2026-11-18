@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -350,12 +351,14 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	keys := make(map[string]bool)
 
 	if !dnsList.IsUnknown() && !dnsList.IsNull() {
-		var dns []ServiceDNSModel
-		resp.Diagnostics.Append(dnsList.ElementsAs(ctx, &dns, false)...)
+		dns := decodeKnownElems[ServiceDNSModel](ctx, dnsList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, d := range dns {
+			if d == nil {
+				continue
+			}
 			if d.Port.IsUnknown() {
 				continue
 			}
@@ -369,12 +372,14 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !httpList.IsUnknown() && !httpList.IsNull() {
-		var http []ServiceHTTPModel
-		resp.Diagnostics.Append(httpList.ElementsAs(ctx, &http, false)...)
+		http := decodeKnownElems[ServiceHTTPModel](ctx, httpList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, h := range http {
+			if h == nil {
+				continue
+			}
 			if h.Port.IsUnknown() {
 				continue
 			}
@@ -393,8 +398,7 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !icmpList.IsUnknown() && !icmpList.IsNull() {
-		var icmp []ServiceICMPModel
-		resp.Diagnostics.Append(icmpList.ElementsAs(ctx, &icmp, false)...)
+		icmp := decodeKnownElems[ServiceICMPModel](ctx, icmpList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -405,12 +409,14 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !natList.IsUnknown() && !natList.IsNull() {
-		var nat []ServiceNATModel
-		resp.Diagnostics.Append(natList.ElementsAs(ctx, &nat, false)...)
+		nat := decodeKnownElems[ServiceNATModel](ctx, natList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, n := range nat {
+			if n == nil {
+				continue
+			}
 			if n.Port.IsUnknown() || n.Proto.IsUnknown() {
 				continue
 			}
@@ -424,8 +430,7 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !anyIEList.IsUnknown() && !anyIEList.IsNull() {
-		var anyIE []ServiceAnyIEModel
-		resp.Diagnostics.Append(anyIEList.ElementsAs(ctx, &anyIE, false)...)
+		anyIE := decodeKnownElems[ServiceAnyIEModel](ctx, anyIEList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -436,12 +441,14 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !protoIEList.IsUnknown() && !protoIEList.IsNull() {
-		var protoIE []ServiceProtoIEModel
-		resp.Diagnostics.Append(protoIEList.ElementsAs(ctx, &protoIE, false)...)
+		protoIE := decodeKnownElems[ServiceProtoIEModel](ctx, protoIEList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, p := range protoIE {
+			if p == nil {
+				continue
+			}
 			if p.Proto.IsUnknown() {
 				continue
 			}
@@ -455,8 +462,7 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !tcpIEList.IsUnknown() && !tcpIEList.IsNull() {
-		var tcpIE []ServiceTCPIEModel
-		resp.Diagnostics.Append(tcpIEList.ElementsAs(ctx, &tcpIE, false)...)
+		tcpIE := decodeKnownElems[ServiceTCPIEModel](ctx, tcpIEList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -467,8 +473,7 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !tcpEList.IsUnknown() && !tcpEList.IsNull() {
-		var tcpE []ServiceTCPEModel
-		resp.Diagnostics.Append(tcpEList.ElementsAs(ctx, &tcpE, false)...)
+		tcpE := decodeKnownElems[ServiceTCPEModel](ctx, tcpEList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -479,8 +484,7 @@ func (r *ServiceServicesResource) ValidateConfig(ctx context.Context, req resour
 	}
 
 	if !fragIEList.IsUnknown() && !fragIEList.IsNull() {
-		var fragIE []ServiceFragIEModel
-		resp.Diagnostics.Append(fragIEList.ElementsAs(ctx, &fragIE, false)...)
+		fragIE := decodeKnownElems[ServiceFragIEModel](ctx, fragIEList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -618,88 +622,42 @@ func (r *ServiceServicesResource) ModifyPlan(ctx context.Context, req resource.M
 		return
 	}
 
-	// Assign correct IDs to plan entries by composite key.
-	// Skip unknown lists — they stay unknown in the plan.
-	assignID := func(id *types.Int64, key string) {
-		if v, ok := idByKey[key]; ok {
-			*id = types.Int64Value(v)
-		} else {
-			*id = types.Int64Unknown()
+	// Assign correct IDs to plan entries by composite key. Works on framework values so
+	// nested unknowns survive; unknown lists stay unknown in the plan.
+	assignPlanIDs(ctx, resp, "dns", planDNS, idByKey, func(a map[string]attr.Value) (string, bool) {
+		port, ok := objAttrInt64(a, "port")
+		if !ok {
+			return "", false
 		}
-	}
-
-	if !planDNS.IsUnknown() && !planDNS.IsNull() {
-		var dns []ServiceDNSModel
-		resp.Diagnostics.Append(planDNS.ElementsAs(ctx, &dns, false)...)
-		for i := range dns {
-			assignID(&dns[i].ID, svcKeyDNS(dns[i].Port.ValueInt64()))
+		return svcKeyDNS(port), true
+	})
+	assignPlanIDs(ctx, resp, "http", planHTTP, idByKey, func(a map[string]attr.Value) (string, bool) {
+		port, ok := objAttrInt64(a, "port")
+		if !ok {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("dns"), dns)...)
-	}
-	if !planHTTP.IsUnknown() && !planHTTP.IsNull() {
-		var http []ServiceHTTPModel
-		resp.Diagnostics.Append(planHTTP.ElementsAs(ctx, &http, false)...)
-		for i := range http {
-			assignID(&http[i].ID, svcKeyHTTP(http[i].Port.ValueInt64()))
+		return svcKeyHTTP(port), true
+	})
+	assignPlanIDs(ctx, resp, "icmp", planICMP, idByKey, func(map[string]attr.Value) (string, bool) { return svcKeyICMP(), true })
+	assignPlanIDs(ctx, resp, "nat", planNAT, idByKey, func(a map[string]attr.Value) (string, bool) {
+		proto, ok1 := objAttrString(a, "proto")
+		port, ok2 := objAttrInt64(a, "port")
+		if !ok1 || !ok2 {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
-	}
-	if !planICMP.IsUnknown() && !planICMP.IsNull() {
-		var icmp []ServiceICMPModel
-		resp.Diagnostics.Append(planICMP.ElementsAs(ctx, &icmp, false)...)
-		for i := range icmp {
-			assignID(&icmp[i].ID, svcKeyICMP())
+		return svcKeyNAT(proto, port), true
+	})
+	assignPlanIDs(ctx, resp, "any_ingress_egress", planAnyIE, idByKey, func(map[string]attr.Value) (string, bool) { return svcKeyAnyIE(), true })
+	assignPlanIDs(ctx, resp, "proto_ingress_egress", planProtoIE, idByKey, func(a map[string]attr.Value) (string, bool) {
+		proto, ok := objAttrInt64(a, "proto")
+		if !ok {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("icmp"), icmp)...)
-	}
-	if !planNAT.IsUnknown() && !planNAT.IsNull() {
-		var nat []ServiceNATModel
-		resp.Diagnostics.Append(planNAT.ElementsAs(ctx, &nat, false)...)
-		for i := range nat {
-			assignID(&nat[i].ID, svcKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
-	}
-	if !planAnyIE.IsUnknown() && !planAnyIE.IsNull() {
-		var anyIE []ServiceAnyIEModel
-		resp.Diagnostics.Append(planAnyIE.ElementsAs(ctx, &anyIE, false)...)
-		for i := range anyIE {
-			assignID(&anyIE[i].ID, svcKeyAnyIE())
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("any_ingress_egress"), anyIE)...)
-	}
-	if !planProtoIE.IsUnknown() && !planProtoIE.IsNull() {
-		var protoIE []ServiceProtoIEModel
-		resp.Diagnostics.Append(planProtoIE.ElementsAs(ctx, &protoIE, false)...)
-		for i := range protoIE {
-			assignID(&protoIE[i].ID, svcKeyProtoIE(protoIE[i].Proto.ValueInt64()))
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("proto_ingress_egress"), protoIE)...)
-	}
-	if !planTCPIE.IsUnknown() && !planTCPIE.IsNull() {
-		var tcpIE []ServiceTCPIEModel
-		resp.Diagnostics.Append(planTCPIE.ElementsAs(ctx, &tcpIE, false)...)
-		for i := range tcpIE {
-			assignID(&tcpIE[i].ID, svcKeyTCPIE())
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_ingress_egress"), tcpIE)...)
-	}
-	if !planTCPE.IsUnknown() && !planTCPE.IsNull() {
-		var tcpE []ServiceTCPEModel
-		resp.Diagnostics.Append(planTCPE.ElementsAs(ctx, &tcpE, false)...)
-		for i := range tcpE {
-			assignID(&tcpE[i].ID, svcKeyTCPE())
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcp_egress"), tcpE)...)
-	}
-	if !planFragIE.IsUnknown() && !planFragIE.IsNull() {
-		var fragIE []ServiceFragIEModel
-		resp.Diagnostics.Append(planFragIE.ElementsAs(ctx, &fragIE, false)...)
-		for i := range fragIE {
-			assignID(&fragIE[i].ID, svcKeyFragIE())
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("frag_ingress_egress"), fragIE)...)
-	}
+		return svcKeyProtoIE(proto), true
+	})
+	assignPlanIDs(ctx, resp, "tcp_ingress_egress", planTCPIE, idByKey, func(map[string]attr.Value) (string, bool) { return svcKeyTCPIE(), true })
+	assignPlanIDs(ctx, resp, "tcp_egress", planTCPE, idByKey, func(map[string]attr.Value) (string, bool) { return svcKeyTCPE(), true })
+	assignPlanIDs(ctx, resp, "frag_ingress_egress", planFragIE, idByKey, func(map[string]attr.Value) (string, bool) { return svcKeyFragIE(), true })
 }
 
 // ---------------------------------------------------------------------------

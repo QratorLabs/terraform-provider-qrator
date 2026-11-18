@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -460,12 +461,14 @@ func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resourc
 	keys := make(map[string]bool)
 
 	if !httpList.IsUnknown() && !httpList.IsNull() {
-		var http []DomainServiceHTTPModel
-		resp.Diagnostics.Append(httpList.ElementsAs(ctx, &http, false)...)
+		http := decodeKnownElems[DomainServiceHTTPModel](ctx, httpList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, h := range http {
+			if h == nil {
+				continue
+			}
 			if h.Port.IsUnknown() {
 				continue
 			}
@@ -484,12 +487,14 @@ func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resourc
 	}
 
 	if !natList.IsUnknown() && !natList.IsNull() {
-		var nat []DomainServiceNATModel
-		resp.Diagnostics.Append(natList.ElementsAs(ctx, &nat, false)...)
+		nat := decodeKnownElems[DomainServiceNATModel](ctx, natList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, n := range nat {
+			if n == nil {
+				continue
+			}
 			if n.Port.IsUnknown() || n.Proto.IsUnknown() {
 				continue
 			}
@@ -503,12 +508,14 @@ func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resourc
 	}
 
 	if !natAllList.IsUnknown() && !natAllList.IsNull() {
-		var natAll []DomainServiceNATAllModel
-		resp.Diagnostics.Append(natAllList.ElementsAs(ctx, &natAll, false)...)
+		natAll := decodeKnownElems[DomainServiceNATAllModel](ctx, natAllList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, n := range natAll {
+			if n == nil {
+				continue
+			}
 			if n.Proto.IsUnknown() {
 				continue
 			}
@@ -522,12 +529,14 @@ func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resourc
 	}
 
 	if !tcpList.IsUnknown() && !tcpList.IsNull() {
-		var tcp []DomainServiceTCPProxyModel
-		resp.Diagnostics.Append(tcpList.ElementsAs(ctx, &tcp, false)...)
+		tcp := decodeKnownElems[DomainServiceTCPProxyModel](ctx, tcpList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, t := range tcp {
+			if t == nil {
+				continue
+			}
 			if t.Port.IsUnknown() {
 				continue
 			}
@@ -541,12 +550,14 @@ func (r *DomainServicesResource) ValidateConfig(ctx context.Context, req resourc
 	}
 
 	if !wsList.IsUnknown() && !wsList.IsNull() {
-		var ws []DomainServiceWSModel
-		resp.Diagnostics.Append(wsList.ElementsAs(ctx, &ws, false)...)
+		ws := decodeKnownElems[DomainServiceWSModel](ctx, wsList, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		for i, w := range ws {
+			if w == nil {
+				continue
+			}
 			if w.Port.IsUnknown() {
 				continue
 			}
@@ -642,56 +653,44 @@ func (r *DomainServicesResource) ModifyPlan(ctx context.Context, req resource.Mo
 		return
 	}
 
-	// Assign correct IDs to plan entries by composite key.
-	// Skip unknown lists — they stay unknown in the plan.
-	assignID := func(id *types.Int64, key string) {
-		if v, ok := idByKey[key]; ok {
-			*id = types.Int64Value(v)
-		} else {
-			*id = types.Int64Unknown()
+	// Assign correct IDs to plan entries by composite key. Works on framework values so
+	// nested unknowns survive; unknown lists stay unknown in the plan.
+	assignPlanIDs(ctx, resp, "http", planHTTP, idByKey, func(a map[string]attr.Value) (string, bool) {
+		port, ok := objAttrInt64(a, "port")
+		if !ok {
+			return "", false
 		}
-	}
-
-	if !planHTTP.IsUnknown() && !planHTTP.IsNull() {
-		var http []DomainServiceHTTPModel
-		resp.Diagnostics.Append(planHTTP.ElementsAs(ctx, &http, false)...)
-		for i := range http {
-			assignID(&http[i].ID, compositeKeyHTTP(http[i].Port.ValueInt64()))
+		return compositeKeyHTTP(port), true
+	})
+	assignPlanIDs(ctx, resp, "nat", planNAT, idByKey, func(a map[string]attr.Value) (string, bool) {
+		proto, ok1 := objAttrString(a, "proto")
+		port, ok2 := objAttrInt64(a, "port")
+		if !ok1 || !ok2 {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("http"), http)...)
-	}
-	if !planNAT.IsUnknown() && !planNAT.IsNull() {
-		var nat []DomainServiceNATModel
-		resp.Diagnostics.Append(planNAT.ElementsAs(ctx, &nat, false)...)
-		for i := range nat {
-			assignID(&nat[i].ID, compositeKeyNAT(nat[i].Proto.ValueString(), nat[i].Port.ValueInt64()))
+		return compositeKeyNAT(proto, port), true
+	})
+	assignPlanIDs(ctx, resp, "nat_all", planNATAll, idByKey, func(a map[string]attr.Value) (string, bool) {
+		proto, ok := objAttrString(a, "proto")
+		if !ok {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat"), nat)...)
-	}
-	if !planNATAll.IsUnknown() && !planNATAll.IsNull() {
-		var natAll []DomainServiceNATAllModel
-		resp.Diagnostics.Append(planNATAll.ElementsAs(ctx, &natAll, false)...)
-		for i := range natAll {
-			assignID(&natAll[i].ID, compositeKeyNATAll(natAll[i].Proto.ValueString()))
+		return compositeKeyNATAll(proto), true
+	})
+	assignPlanIDs(ctx, resp, "tcpproxy", planTCPProxy, idByKey, func(a map[string]attr.Value) (string, bool) {
+		port, ok := objAttrInt64(a, "port")
+		if !ok {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("nat_all"), natAll)...)
-	}
-	if !planTCPProxy.IsUnknown() && !planTCPProxy.IsNull() {
-		var tcp []DomainServiceTCPProxyModel
-		resp.Diagnostics.Append(planTCPProxy.ElementsAs(ctx, &tcp, false)...)
-		for i := range tcp {
-			assignID(&tcp[i].ID, compositeKeyTCPProxy(tcp[i].Port.ValueInt64()))
+		return compositeKeyTCPProxy(port), true
+	})
+	assignPlanIDs(ctx, resp, "websocket", planWS, idByKey, func(a map[string]attr.Value) (string, bool) {
+		port, ok := objAttrInt64(a, "port")
+		if !ok {
+			return "", false
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tcpproxy"), tcp)...)
-	}
-	if !planWS.IsUnknown() && !planWS.IsNull() {
-		var ws []DomainServiceWSModel
-		resp.Diagnostics.Append(planWS.ElementsAs(ctx, &ws, false)...)
-		for i := range ws {
-			assignID(&ws[i].ID, compositeKeyWebSocket(ws[i].Port.ValueInt64()))
-		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("websocket"), ws)...)
-	}
+		return compositeKeyWebSocket(port), true
+	})
 }
 
 // ---------------------------------------------------------------------------
