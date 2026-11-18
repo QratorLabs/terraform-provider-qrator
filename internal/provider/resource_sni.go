@@ -126,8 +126,9 @@ func (r *SNIResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 		return
 	}
 
-	var sniEntries []SNIEntryModel
-	resp.Diagnostics.Append(links.ElementsAs(ctx, &sniEntries, false)...)
+	// nil entry = the element itself is not known yet; unknown hosts are
+	// reported by Host.IsUnknown().
+	sniEntries := decodeKnownElems[SNIEntryModel](ctx, links, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -138,8 +139,13 @@ func (r *SNIResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 	}
 
 	hasDefault := false
+	hasUnknown := false // an unknown element/host may turn out to be the default entry
 	hostnames := make(map[string]bool)
 	for i, e := range sniEntries {
+		if e == nil || e.Host.IsUnknown() {
+			hasUnknown = true
+			continue
+		}
 		if e.Host.IsNull() {
 			if hasDefault {
 				resp.Diagnostics.AddAttributeError(path.Root("links").AtListIndex(i),
@@ -156,7 +162,7 @@ func (r *SNIResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 		}
 	}
 
-	if len(sniEntries) > 0 && !hasDefault {
+	if len(sniEntries) > 0 && !hasDefault && !hasUnknown {
 		resp.Diagnostics.AddAttributeError(path.Root("links"),
 			"Missing default SNI entry", "Non-empty SNI list must include an entry with null host (default certificate)")
 	}
@@ -180,11 +186,19 @@ func (r *SNIResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReq
 		return
 	}
 
-	var planEntries, stateEntries []SNIEntryModel
-	resp.Diagnostics.Append(planLinks.ElementsAs(ctx, &planEntries, false)...)
+	var stateEntries []SNIEntryModel
 	resp.Diagnostics.Append(stateLinks.ElementsAs(ctx, &stateEntries, false)...)
+	planPtrs := decodeKnownElems[SNIEntryModel](ctx, planLinks, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// An element that is not known yet cannot be matched against state.
+	planEntries := make([]SNIEntryModel, len(planPtrs))
+	for i, e := range planPtrs {
+		if e == nil {
+			return
+		}
+		planEntries[i] = *e
 	}
 
 	stateByHost := make(map[string]*SNIEntryModel, len(stateEntries))

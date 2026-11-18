@@ -209,11 +209,15 @@ func (r *CDNResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 		return
 	}
 
-	var versions []string
-	data.TLSVersions.ElementsAs(ctx, &versions, false)
+	var versions []types.String
+	resp.Diagnostics.Append(data.TLSVersions.ElementsAs(ctx, &versions, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	for _, v := range versions {
-		if v == "TLSv1.2" || v == "TLSv1.3" {
+		// An unknown element may turn out to be a supported version.
+		if v.IsUnknown() || v.ValueString() == "TLSv1.2" || v.ValueString() == "TLSv1.3" {
 			return
 		}
 	}
