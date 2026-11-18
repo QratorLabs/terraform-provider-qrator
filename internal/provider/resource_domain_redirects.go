@@ -213,8 +213,26 @@ func (r *DomainRedirectsResource) Configure(ctx context.Context, req resource.Co
 // ---------------------------------------------------------------------------
 
 func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var redirects types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("redirects"), &redirects)...)
+	if resp.Diagnostics.HasError() || redirects.IsNull() || redirects.IsUnknown() {
+		return
+	}
+
+	value, err := redirects.ToTerraformValue(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid redirect rules", err.Error())
+		return
+	}
+	// Nested objects may also be unknown during validation. Defer checks until
+	// Terraform can provide the complete list, rather than decoding unknowns
+	// into Go structs and pointers that cannot represent them.
+	if !value.IsFullyKnown() {
+		return
+	}
+
 	var model DomainRedirectsResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &model)...)
+	resp.Diagnostics.Append(redirects.ElementsAs(ctx, &model.Redirects, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
