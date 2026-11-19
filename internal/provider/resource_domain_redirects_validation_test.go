@@ -40,6 +40,10 @@ func newRedirectsValidateHarness(t *testing.T) *redirectsValidateHarness {
 // rule builds a redirect rule. port/hostType may be unknown via tftypes.UnknownValue;
 // uri == nil means null (match any URI).
 func (h *redirectsValidateHarness) rule(port, hostTypeVal interface{}, uriValue *string) tftypes.Value {
+	return h.ruleWithHostname(port, hostTypeVal, nil, uriValue)
+}
+
+func (h *redirectsValidateHarness) ruleWithHostname(port, hostTypeVal, hostValue interface{}, uriValue *string) tftypes.Value {
 	uri := tftypes.NewValue(h.uriType, nil)
 	if uriValue != nil {
 		uri = tftypes.NewValue(h.uriType, map[string]tftypes.Value{
@@ -52,7 +56,7 @@ func (h *redirectsValidateHarness) rule(port, hostTypeVal interface{}, uriValue 
 			"port": tftypes.NewValue(tftypes.Number, port),
 			"hostname": tftypes.NewValue(h.hostType, map[string]tftypes.Value{
 				"type":  tftypes.NewValue(tftypes.String, hostTypeVal),
-				"value": tftypes.NewValue(tftypes.String, nil),
+				"value": tftypes.NewValue(tftypes.String, hostValue),
 			}),
 			"uri": uri,
 		}),
@@ -119,6 +123,36 @@ func TestDomainRedirectsValidateConfigUnknownElements(t *testing.T) {
 			t.Fatal("expected duplicate diagnostics, got none")
 		}
 	})
+}
+
+func TestDomainRedirectsValidateConfigDefaultURIHostnames(t *testing.T) {
+	h := newRedirectsValidateHarness(t)
+	fqdn := func(port int, host string) tftypes.Value {
+		return h.ruleWithHostname(port, "fqdn", host, nil)
+	}
+	for _, tc := range []struct {
+		name      string
+		rules     []tftypes.Value
+		duplicate bool
+	}{
+		{"existing wildcard domain rules", []tftypes.Value{fqdn(80, "www.example.com"), fqdn(443, "www.example.com"), h.rule(80, "any", nil)}, false},
+		{"different hostnames same port", []tftypes.Value{fqdn(80, "www.example.com"), fqdn(80, "api.example.com")}, false},
+		{"same hostname different ports", []tftypes.Value{fqdn(80, "www.example.com"), fqdn(443, "www.example.com")}, false},
+		{"same hostname same port", []tftypes.Value{fqdn(80, "www.example.com"), fqdn(80, "www.example.com")}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := h.validate(h.list(tc.rules...))
+			found := false
+			for _, diag := range resp.Diagnostics {
+				if strings.Contains(diag.Summary(), "Duplicate default-URI") {
+					found = true
+				}
+			}
+			if found != tc.duplicate || (!tc.duplicate && resp.Diagnostics.HasError()) {
+				t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+			}
+		})
+	}
 }
 
 func TestDomainRedirectsValidateConfigKnownErrors(t *testing.T) {
