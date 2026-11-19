@@ -237,9 +237,14 @@ func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resour
 
 	// Per-port counters for API constraints:
 	//   "only one 'any' per port"     — at most one hostname.type="any" rule per port
-	//   "only one 'default' per port" — at most one uri=null rule per port
+	//   "only one default per hostname and port" — at most one uri=null rule per hostname and port
 	anyHostnamePerPort := make(map[int64]int) // port → count of hostname=any rules
-	defaultURIPerPort := make(map[int64]int)  // port → count of uri=null rules
+	type hostnamePort struct {
+		port      int64
+		hostType  string
+		hostValue string
+	}
+	defaultURIByHostnamePort := make(map[hostnamePort]bool)
 	seen := make(map[string]bool, len(rules))
 
 	for i, e := range rules {
@@ -278,16 +283,19 @@ func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resour
 			}
 		}
 
-		// "only one 'default' per port": at most one uri=null rule per port.
+		// A default URI rule is unique for each hostname matcher and port.
 		if e.From.URI == nil {
-			defaultURIPerPort[port]++
-			if defaultURIPerPort[port] > 1 {
+			key := hostnamePort{port: port, hostType: e.From.Hostname.Type.ValueString()}
+			if key.hostType == "fqdn" {
+				key.hostValue = e.From.Hostname.Value.ValueString()
+			}
+			if defaultURIByHostnamePort[key] {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("redirects").AtListIndex(i).AtName("from").AtName("uri"),
 					"Duplicate default-URI rule",
-					fmt.Sprintf("Only one rule with uri=null (match any URI) is allowed per port. "+
-						"Port %d already has an earlier uri=null rule.", port))
+					fmt.Sprintf("Only one rule with uri=null (match any URI) is allowed per hostname and port. Port %d already has an earlier rule for this hostname.", port))
 			}
+			defaultURIByHostnamePort[key] = true
 		}
 
 		// Exact uniqueness check by composite key.
