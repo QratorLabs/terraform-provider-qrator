@@ -771,3 +771,41 @@ func emptyTfsdkState(t *testing.T, s schema.Schema) tfsdk.State {
 	t.Helper()
 	return tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(context.Background()), nil)}
 }
+
+// The API encodes empty sections as [] although the schema says object|null.
+func TestAccessFilterFromAPIEmptyArraySections(t *testing.T) {
+	raw := `{
+		"skip": [],
+		"geo": [],
+		"ip": {"deny": ["129.205.113.0/24"], "deny_rule_blocking_http_status_code": 403},
+		"uri": [],
+		"user_agent": [],
+		"referer": [ ],
+		"method": []
+	}`
+	var api apiCdnFilter
+	if err := json.Unmarshal([]byte(raw), &api); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if api.Skip == nil || len(api.Skip.IP) != 0 {
+		t.Errorf("skip = %+v, want empty section", api.Skip)
+	}
+	if api.IP == nil || len(api.IP.Deny) != 1 || api.IP.Deny[0] != "129.205.113.0/24" {
+		t.Errorf("ip = %+v, want deny [129.205.113.0/24]", api.IP)
+	}
+
+	got := fromAPIJSON(t, raw, nil)
+	if !got.SkipIPs.IsNull() {
+		t.Errorf("skip_ips = %s, want null", got.SkipIPs)
+	}
+	if got.IP == nil || !got.IP.Deny.Equal(setOf("129.205.113.0/24")) {
+		t.Errorf("ip.deny = %+v, want [129.205.113.0/24]", got.IP)
+	}
+}
+
+func TestAPIFilterSectionsRejectNonEmptyArray(t *testing.T) {
+	var api apiCdnFilter
+	if err := json.Unmarshal([]byte(`{"skip": ["1.2.3.4"]}`), &api); err == nil {
+		t.Error("expected an error for a non-empty array in skip")
+	}
+}
