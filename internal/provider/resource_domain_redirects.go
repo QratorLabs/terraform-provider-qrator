@@ -235,11 +235,14 @@ func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resour
 		return
 	}
 
-	// Per-port counters for API constraints:
-	//   "only one 'any' per port"     — at most one hostname.type="any" rule per port
-	//   "only one 'default' per port" — at most one uri=null rule per port
+	// API constraints (RedirectList.json, "from"): "only uniq objects, only one
+	// 'default' per port, only one 'any' per port".
+	//   - "only one 'any' per port": at most one hostname.type="any" rule per port.
+	//   - "only uniq objects": exact duplicates of the from matcher are rejected below.
+	//   - "'default'" (any hostname + any URI) is a hostname.type="any" rule, so it is
+	//     covered by the two checks above. Rules with uri=null and different
+	//     hostname matchers on one port (e.g. fqdn + any) are valid.
 	anyHostnamePerPort := make(map[int64]int) // port → count of hostname=any rules
-	defaultURIPerPort := make(map[int64]int)  // port → count of uri=null rules
 	seen := make(map[string]bool, len(rules))
 
 	for i, e := range rules {
@@ -275,18 +278,6 @@ func (r *DomainRedirectsResource) ValidateConfig(ctx context.Context, req resour
 					"Duplicate any-hostname rule",
 					fmt.Sprintf("Only one rule with hostname.type=\"any\" is allowed per port. "+
 						"Port %d already has an earlier any-hostname rule.", port))
-			}
-		}
-
-		// "only one 'default' per port": at most one uri=null rule per port.
-		if e.From.URI == nil {
-			defaultURIPerPort[port]++
-			if defaultURIPerPort[port] > 1 {
-				resp.Diagnostics.AddAttributeError(
-					path.Root("redirects").AtListIndex(i).AtName("from").AtName("uri"),
-					"Duplicate default-URI rule",
-					fmt.Sprintf("Only one rule with uri=null (match any URI) is allowed per port. "+
-						"Port %d already has an earlier uri=null rule.", port))
 			}
 		}
 

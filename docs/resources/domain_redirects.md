@@ -174,4 +174,4 @@ Optional:
 - `from.hostname.value` is required and must be non-empty when `from.hostname.type` is `"fqdn"`.
 - Each `from` matcher must be unique (port + hostname type/value + URI type/value).
 - Per port, at most one rule may have `from.hostname.type = "any"`.
-- Per port, at most one rule may have `from.uri = null`.
+- Rules with `from.uri = null` may share a port as long as their `from.hostname` matchers differ (for example an `fqdn` rule and the `any` rule).

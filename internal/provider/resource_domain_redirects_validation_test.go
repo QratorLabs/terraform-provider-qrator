@@ -40,6 +40,15 @@ func newRedirectsValidateHarness(t *testing.T) *redirectsValidateHarness {
 // rule builds a redirect rule. port/hostType may be unknown via tftypes.UnknownValue;
 // uri == nil means null (match any URI).
 func (h *redirectsValidateHarness) rule(port, hostTypeVal interface{}, uriValue *string) tftypes.Value {
+	return h.ruleHost(port, hostTypeVal, nil, uriValue)
+}
+
+// ruleHost is like rule, with an explicit hostname.value (nil = null).
+func (h *redirectsValidateHarness) ruleHost(port, hostTypeVal interface{}, hostValue *string, uriValue *string) tftypes.Value {
+	var hv interface{}
+	if hostValue != nil {
+		hv = *hostValue
+	}
 	uri := tftypes.NewValue(h.uriType, nil)
 	if uriValue != nil {
 		uri = tftypes.NewValue(h.uriType, map[string]tftypes.Value{
@@ -52,7 +61,7 @@ func (h *redirectsValidateHarness) rule(port, hostTypeVal interface{}, uriValue 
 			"port": tftypes.NewValue(tftypes.Number, port),
 			"hostname": tftypes.NewValue(h.hostType, map[string]tftypes.Value{
 				"type":  tftypes.NewValue(tftypes.String, hostTypeVal),
-				"value": tftypes.NewValue(tftypes.String, nil),
+				"value": tftypes.NewValue(tftypes.String, hv),
 			}),
 			"uri": uri,
 		}),
@@ -133,10 +142,18 @@ func TestDomainRedirectsValidateConfigKnownErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("duplicate default uri", func(t *testing.T) {
+	t.Run("duplicate any rule with uri=null", func(t *testing.T) {
 		resp := h.validate(h.list(h.rule(80, "any", nil), h.rule(80, "any", nil)))
 		if !resp.Diagnostics.HasError() {
 			t.Fatal("expected diagnostics")
+		}
+	})
+
+	t.Run("exact duplicate fqdn rule", func(t *testing.T) {
+		www := "www.example.com"
+		resp := h.validate(h.list(h.ruleHost(80, "fqdn", &www, nil), h.ruleHost(80, "fqdn", &www, nil)))
+		if !resp.Diagnostics.HasError() {
+			t.Fatal("expected duplicate rule diagnostics")
 		}
 	})
 
@@ -152,6 +169,34 @@ func TestDomainRedirectsValidateConfigKnownErrors(t *testing.T) {
 		}
 		if !strings.Contains(resp.Diagnostics[0].Summary(), "Too many") {
 			t.Fatalf("unexpected diagnostic: %v", resp.Diagnostics)
+		}
+	})
+}
+
+// Regression for issue #9: rules with uri=null and different hostname matchers
+// may share a port (fqdn + any), as accepted by the Qrator API.
+func TestDomainRedirectsValidateConfigDefaultURIDifferentHostnames(t *testing.T) {
+	h := newRedirectsValidateHarness(t)
+	www, api := "www.example.com", "api.example.com"
+
+	t.Run("fqdn and any on one port", func(t *testing.T) {
+		resp := h.validate(h.list(
+			h.ruleHost(80, "fqdn", &www, nil),
+			h.ruleHost(443, "fqdn", &www, nil),
+			h.rule(80, "any", nil),
+		))
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+		}
+	})
+
+	t.Run("different fqdn on one port", func(t *testing.T) {
+		resp := h.validate(h.list(
+			h.ruleHost(80, "fqdn", &www, nil),
+			h.ruleHost(80, "fqdn", &api, nil),
+		))
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 		}
 	})
 }
